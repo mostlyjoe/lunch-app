@@ -1,11 +1,13 @@
-﻿// pages/api/signup.js
-import { createClient } from "@supabase/supabase-js";
-import { supabaseAdmin } from "../../lib/supabaseAdmin";
+﻿import { createClient } from "@supabase/supabase-js";
 
-// ✅ Public client (anon key) — used only for signUp()
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
+
+const adminClient = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 export default async function handler(req, res) {
@@ -16,10 +18,11 @@ export default async function handler(req, res) {
   try {
     const { email, pin, firstName, lastName, shift } = req.body;
 
-    // ✅ Step 1: Create user in Supabase Auth (public client)
-    const { data, error } = await supabase.auth.signUp({
+    // ✅ Step 1: Create user in Supabase Auth using service key
+    const { data, error } = await adminClient.auth.admin.createUser({
       email,
-      password: pin, // 6-digit PIN as password
+      password: pin,
+      email_confirm: true, // mark verified immediately
     });
 
     if (error) {
@@ -43,21 +46,18 @@ export default async function handler(req, res) {
       });
     }
 
-    // ✅ Step 2: Insert matching profile row using service-role key
-    const { error: profileError } = await supabaseAdmin
-      .from("profiles")
-      .insert({
-        id: user.id,
-        first_name: firstName,
-        last_name: lastName,
-        company_name: "compName01", // default placeholder
-        shift_type: shift,
-        is_admin: false,
-      });
+    // ✅ Step 2: Insert profile row
+    const { error: profileError } = await adminClient.from("profiles").insert({
+      id: user.id,
+      first_name: firstName,
+      last_name: lastName,
+      company_name: "compName01",
+      shift_type: shift,
+      is_admin: false,
+    });
 
     if (profileError) {
-      // ❌ Roll back auth user if profile insert fails
-      await supabaseAdmin.auth.admin.deleteUser(user.id);
+      await adminClient.auth.admin.deleteUser(user.id);
       return res.status(400).json({
         error: "PROFILE_CREATION_FAILED",
         message: "Profile creation failed. No account was created.",
