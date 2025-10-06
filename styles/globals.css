@@ -1,26 +1,172 @@
-@import "tailwindcss";
+/* ---------------------------------------------------------
+   LunchApp Global Stylesheet
+   Ensures readability, consistency, and mobile visibility
+------------------------------------------------------------ */
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ✅ Universal resets and defaults */
+html,
+body {
+  padding: 0;
+  margin: 0;
+  font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background-color: #fafafa;
+  color: #111;
+  line-height: 1.6;
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* ✅ Anchor tags */
+a {
+  color: #d32f2f;
+  text-decoration: none;
+  transition: color 0.15s ease;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+a:hover {
+  color: #9a0007;
+}
+
+/* ✅ Navbar styling (preserves your yellow/red theme) */
+nav {
+  background-color: #fff176 !important; /* Yellow */
+  color: #c62828 !important; /* Red text */
+  font-family: "Roboto", sans-serif;
+  font-weight: 500;
+}
+
+nav a {
+  color: #c62828 !important;
+}
+
+nav a:hover {
+  opacity: 0.85;
+}
+
+/* ✅ Page containers */
+main {
+  padding: 1rem;
+  background-color: #fafafa;
+  color: #111;
+  min-height: 100vh;
+}
+
+/* ✅ Cards and panels */
+.card {
+  background-color: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+  color: #111;
+}
+
+.card h2,
+.card h3,
+.card p {
+  color: #111;
+}
+
+/* ✅ Buttons */
+button {
+  background-color: #c62828;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.65rem 1.25rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.05s ease;
+}
+
+button:hover:not(:disabled) {
+  background-color: #b71c1c;
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  background-color: #ccc;
+  color: #666;
+  cursor: not-allowed;
+}
+
+/* ✅ Inputs, selects, and textareas */
+input,
+select,
+textarea {
+  width: 100%;
+  padding: 0.65rem 0.7rem;
+  border: 2px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-family: inherit;
+  color: #111;
+  background-color: #fff;
+  transition: border-color 0.15s;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: #0070f3;
+}
+
+input.error-border,
+select.error-border,
+textarea.error-border {
+  border-color: #dc2626;
+}
+
+input.success-border,
+select.success-border,
+textarea.success-border {
+  border-color: #16a34a;
+}
+
+/* ✅ Toasts */
+.toast {
+  border-radius: 8px;
+  font-weight: 600;
+  padding: 0.8rem 1rem;
+  font-size: 0.95rem;
+}
+
+/* ✅ Text utilities */
+.error-text {
+  color: #b91c1c;
+  font-size: 0.85rem;
+}
+
+.info-text {
+  color: #374151;
+  font-size: 0.85rem;
+}
+
+/* ✅ Responsive typography */
+@media (max-width: 480px) {
+  body {
+    font-size: 15px;
+  }
+  h1, h2, h3 {
+    font-size: 1.2rem;
+  }
+  .card {
+    padding: 1rem;
+  }
+  button {
+    font-size: 0.95rem;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ✅ Safe dark-mode fallback (optional) */
+@media (prefers-color-scheme: dark) {
+  body {
+    background-color: #f5f5f5;
+    color: #111;
+  }
 }
