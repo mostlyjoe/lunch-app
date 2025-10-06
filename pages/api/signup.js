@@ -1,13 +1,13 @@
 ﻿// pages/api/signup.js
 import { createClient } from "@supabase/supabase-js";
 
-// Public client (anon) for safe operations
+// Public client for auth signup (handles email verification automatically)
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
-// Admin client (service role) for secure privileged operations
+// Admin client for inserting into protected tables
 const adminClient = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -21,12 +21,11 @@ export default async function handler(req, res) {
   try {
     const { email, pin, firstName, lastName, shift } = req.body;
 
-    // ✅ Step 1: Create user in Supabase Auth using service key
-    // ❗ Do NOT set email_confirm: true — we want email verification flow
-    const { data, error } = await adminClient.auth.admin.createUser({
+    // ✅ Step 1: Create user through public supabase client
+    // This triggers Supabase's built-in confirmation email flow
+    const { data, error } = await supabase.auth.signUp({
       email,
       password: pin,
-      email_confirm: false, // Supabase will send a verification email
     });
 
     if (error) {
@@ -50,7 +49,8 @@ export default async function handler(req, res) {
       });
     }
 
-    // ✅ Step 2: Insert profile row (same as before)
+    // ✅ Step 2: Insert profile using admin client (service role)
+    // We can safely insert even before email confirmation
     const { error: profileError } = await adminClient.from("profiles").insert({
       id: user.id,
       first_name: firstName,
@@ -61,7 +61,7 @@ export default async function handler(req, res) {
     });
 
     if (profileError) {
-      // ❌ Rollback Auth user if profile creation fails
+      // ❌ Rollback Auth user if profile insert fails
       await adminClient.auth.admin.deleteUser(user.id);
       return res.status(400).json({
         error: "PROFILE_CREATION_FAILED",
@@ -69,10 +69,10 @@ export default async function handler(req, res) {
       });
     }
 
-    // ✅ Success — tell user to check email
+    // ✅ Step 3: Tell user to check their email
     return res.status(200).json({
       message:
-        "Signup successful. Please check your email to confirm your account before logging in.",
+        "Signup successful! Please check your email to confirm your account before logging in.",
       user,
     });
   } catch (err) {
