@@ -170,3 +170,51 @@ textarea.success-border {
     color: #111;
   }
 }
+
+/* ---------------------------------------------------------
+   Responsive, contained, square menu images
+------------------------------------------------------------ */
+
+/* ✅ Consistent menu images - responsive & contained */
+.menu-item img,
+.menu-card img,
+.menu-tile img,
+.admin-menu img {
+  aspect-ratio: 1 / 1;         /* always square */
+  object-fit: contain;         /* show full image, no cropping */
+  background-color: #fff;      /* clean padding background */
+  border-radius: 10px;
+  display: block;
+  margin: 0 auto;
+  width: 100%;
+  max-width: 320px;            /* default desktop size */
+  height: auto;
+}
+
+/* ✅ Container alignment for menu items */
+.menu-item,
+.menu-card,
+.menu-tile,
+.admin-menu-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  margin: 1rem auto;
+  text-align: center;
+}
+
+/* ✅ Responsive behavior - mobile full width */
+@media (max-width: 768px) {
+  .menu-item img,
+  .menu-card img,
+  .menu-tile img {
+    max-width: 100%;           /* fill width on mobile */
+  }
+
+  .menu-item,
+  .menu-card,
+  .menu-tile {
+    width: 100%;
+  }
+}
