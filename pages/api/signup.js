@@ -1,10 +1,13 @@
-﻿import { createClient } from "@supabase/supabase-js";
+﻿// pages/api/signup.js
+import { createClient } from "@supabase/supabase-js";
 
+// Public client (anon) for safe operations
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
 );
 
+// Admin client (service role) for secure privileged operations
 const adminClient = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -19,10 +22,11 @@ export default async function handler(req, res) {
     const { email, pin, firstName, lastName, shift } = req.body;
 
     // ✅ Step 1: Create user in Supabase Auth using service key
+    // ❗ Do NOT set email_confirm: true — we want email verification flow
     const { data, error } = await adminClient.auth.admin.createUser({
       email,
       password: pin,
-      email_confirm: true, // mark verified immediately
+      email_confirm: false, // Supabase will send a verification email
     });
 
     if (error) {
@@ -46,7 +50,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // ✅ Step 2: Insert profile row
+    // ✅ Step 2: Insert profile row (same as before)
     const { error: profileError } = await adminClient.from("profiles").insert({
       id: user.id,
       first_name: firstName,
@@ -57,6 +61,7 @@ export default async function handler(req, res) {
     });
 
     if (profileError) {
+      // ❌ Rollback Auth user if profile creation fails
       await adminClient.auth.admin.deleteUser(user.id);
       return res.status(400).json({
         error: "PROFILE_CREATION_FAILED",
@@ -64,8 +69,10 @@ export default async function handler(req, res) {
       });
     }
 
+    // ✅ Success — tell user to check email
     return res.status(200).json({
-      message: "Signup successful",
+      message:
+        "Signup successful. Please check your email to confirm your account before logging in.",
       user,
     });
   } catch (err) {
