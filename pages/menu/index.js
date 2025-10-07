@@ -3,17 +3,18 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "../../lib/supabaseClient";
 import { getMenuItems } from "../../lib/db/menuItems";
+import toast from "react-hot-toast";
 
 export default function MenuPage() {
     const router = useRouter();
     const [hasMounted, setHasMounted] = useState(false);
     const [user, setUser] = useState(null);
     const [menu, setMenu] = useState([]);
-    const [toast, setToast] = useState(null);
     const [now, setNow] = useState(Date.now());
 
     useEffect(() => setHasMounted(true), []);
 
+    // ⏱️ Live update every minute to refresh pill colors
     useEffect(() => {
         const id = setInterval(() => setNow(Date.now()), 60_000);
         return () => clearInterval(id);
@@ -21,11 +22,6 @@ export default function MenuPage() {
 
     const YELLOW_HOURS = 24;
     const ORANGE_HOURS = 12;
-
-    function showToast(message, type = "info") {
-        setToast({ msg: message, type });
-        setTimeout(() => setToast(null), 3500);
-    }
 
     const refreshMenu = useCallback(async () => {
         try {
@@ -42,10 +38,11 @@ export default function MenuPage() {
             );
             setMenu(visibleItems);
         } catch (err) {
-            showToast("❌ Failed to load menu: " + err.message, "error");
+            toast.error("❌ Failed to load menu.");
         }
     }, []);
 
+    // 🔐 Load user and menu
     useEffect(() => {
         async function init() {
             const { data } = await supabase.auth.getUser();
@@ -59,14 +56,15 @@ export default function MenuPage() {
         init();
     }, [refreshMenu]);
 
+    // ✅ Handle redirect query for placed/updated orders
     useEffect(() => {
         if (!router.isReady) return;
         const { placed, item, ...rest } = router.query;
 
         if (placed === "created") {
-            showToast(`✅ Order created${item ? ` for ${item}` : ""}!`, "success");
+            toast.success(`✅ Order created${item ? ` for ${item}` : ""}!`);
         } else if (placed === "updated") {
-            showToast(`✅ Order updated${item ? ` for ${item}` : ""}!`, "success");
+            toast.success(`✅ Order updated${item ? ` for ${item}` : ""}!`);
         }
 
         if (placed) {
@@ -156,8 +154,8 @@ export default function MenuPage() {
                 a[0] === "unscheduled"
                     ? 1
                     : b[0] === "unscheduled"
-                        ? -1
-                        : a[0].localeCompare(b[0])
+                    ? -1
+                    : a[0].localeCompare(b[0])
             )
             .map(([dateKey, items]) => ({ dateKey, items }));
     }, [menu]);
@@ -177,33 +175,12 @@ export default function MenuPage() {
         items.some((m) => isVisible(m))
     );
 
-    // ✅ Safe hydration and hook order
+    // 🟢 Safe hydration
     if (!hasMounted || !user) {
         return (
             <main className="menu-page">
                 <h1 className="page-title">MENU</h1>
                 <p className="loading">Loading...</p>
-
-                <style jsx>{`
-                    .menu-page {
-                        padding: 1.5rem;
-                        background: #fdfdfd;
-                        min-height: 100vh;
-                        display: flex;
-                        flex-direction: column;
-                        align-items: center;
-                        justify-content: center;
-                        font-size: 1.2rem;
-                        color: #444;
-                    }
-                    .page-title {
-                        font-size: 1.9rem;
-                        font-weight: 800;
-                        text-align: center;
-                        margin-bottom: 1rem;
-                        color: #1b5e20;
-                    }
-                `}</style>
             </main>
         );
     }
@@ -238,10 +215,10 @@ export default function MenuPage() {
                 const serveDate = parseYMDLocal(dateKey);
                 const serveDateText = serveDate
                     ? serveDate.toLocaleDateString(undefined, {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                    })
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                      })
                     : "";
 
                 return (
@@ -274,8 +251,9 @@ export default function MenuPage() {
                                         role="button"
                                         tabIndex={0}
                                         aria-label={`View ${m.title}`}
-                                        className={`menu-tile ${expired ? "expired" : ""
-                                            }`}
+                                        className={`menu-tile ${
+                                            expired ? "expired" : ""
+                                        }`}
                                         onClick={() => !expired && goToItem(m.id)}
                                         onKeyDown={(e) =>
                                             !expired && keyActivate(e, m.id)
@@ -286,17 +264,12 @@ export default function MenuPage() {
                                             {m.image_url ? (
                                                 <img src={m.image_url} alt={m.title} />
                                             ) : (
-                                                <div className="media-fallback">
-                                                    No image
-                                                </div>
+                                                <div className="media-fallback">No image</div>
                                             )}
                                         </div>
                                         <div className="tile-body">
                                             <div className="tile-title">{m.title}</div>
-                                            <div
-                                                className="tile-desc"
-                                                title={m.description}
-                                            >
+                                            <div className="tile-desc" title={m.description}>
                                                 {m.description}
                                             </div>
                                         </div>
@@ -312,8 +285,6 @@ export default function MenuPage() {
                     </section>
                 );
             })}
-
-            {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
 
             <style jsx>{`
                 .menu-page {
@@ -364,13 +335,6 @@ export default function MenuPage() {
                     gap: 0.4rem;
                     margin-bottom: 0.75rem;
                     align-items: center;
-                }
-
-                .date-card-header h2 {
-                    margin: 0;
-                    font-size: 1.3rem;
-                    color: #111;
-                    font-weight: 800;
                 }
 
                 .pill {
@@ -508,42 +472,6 @@ export default function MenuPage() {
                     color: #333;
                     font-weight: 600;
                     border-top: 1px solid #f4e9a8;
-                }
-
-                .toast {
-                    position: fixed;
-                    top: 1rem;
-                    right: 1rem;
-                    padding: 1rem 1.25rem;
-                    border-radius: 8px;
-                    font-weight: bold;
-                    z-index: 1000;
-                    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
-                    animation: fadeInOut 3.5s ease forwards;
-                }
-                .toast.success {
-                    background: #e8f5e9;
-                    color: #1b5e20;
-                }
-                .toast.error {
-                    background: #ffebee;
-                    color: #b71c1c;
-                }
-
-                @keyframes fadeInOut {
-                    0% {
-                        opacity: 0;
-                        transform: translateY(-5px);
-                    }
-                    10%,
-                    90% {
-                        opacity: 1;
-                        transform: translateY(0);
-                    }
-                    100% {
-                        opacity: 0;
-                        transform: translateY(-5px);
-                    }
                 }
             `}</style>
         </main>

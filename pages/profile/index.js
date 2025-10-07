@@ -6,7 +6,6 @@ import toast from "react-hot-toast";
 
 export default function ProfilePage() {
     const [profile, setProfile] = useState(null);
-    const [msg, setMsg] = useState(null);
     const [showNotice, setShowNotice] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
 
@@ -21,12 +20,12 @@ export default function ProfilePage() {
             try {
                 const p = await getProfile(data.user.id);
                 if (!p) {
-                    setMsg({ text: "No profile found. Please complete signup.", type: "error" });
+                    toast.error("❌ No profile found. Please complete signup.");
                 } else {
                     setProfile(p);
                 }
             } catch (err) {
-                setMsg({ text: "Failed to load profile: " + err.message, type: "error" });
+                toast.error("Failed to load profile: " + err.message);
             }
         }
         loadProfile();
@@ -36,7 +35,6 @@ export default function ProfilePage() {
         const newShift = e.target.value;
         if (profile?.shift_type && newShift !== profile.shift_type) {
             setShowNotice(true);
-            // Auto-fade out after 3 s
             setTimeout(() => setShowNotice(false), 3000);
         }
         setProfile({ ...profile, shift_type: newShift });
@@ -50,10 +48,9 @@ export default function ProfilePage() {
                 last_name: profile.last_name,
                 shift_type: profile.shift_type,
             });
-            toast.success("Profile updated successfully!");
-            setMsg(null);
+            toast.success("✅ Profile updated successfully!");
         } catch (err) {
-            toast.error("Failed to update profile");
+            toast.error("❌ Failed to update profile.");
         }
     }
 
@@ -66,9 +63,9 @@ export default function ProfilePage() {
         return (
             <main className="profile-container">
                 <h2>My Profile</h2>
-                <p>{msg?.text || "Loading profile..."}</p>
+                <p>Loading profile...</p>
                 <style jsx>{`
-                    .profile-container { padding: 2rem; }
+                    .profile-container { padding: 2rem; text-align: center; }
                 `}</style>
             </main>
         );
@@ -78,8 +75,6 @@ export default function ProfilePage() {
         <main className="profile-container">
             <div className="card">
                 <h2>My Profile</h2>
-
-                {msg && <div className={`banner ${msg.type}`}>{msg.text}</div>}
 
                 <form onSubmit={handleSave} className="form">
                     <label>
@@ -122,7 +117,10 @@ export default function ProfilePage() {
                         </div>
                     )}
 
-                    <button type="submit" disabled={!profile.first_name || !profile.last_name || !profile.shift_type}>
+                    <button
+                        type="submit"
+                        disabled={!profile.first_name || !profile.last_name || !profile.shift_type}
+                    >
                         Save Changes
                     </button>
                 </form>
@@ -163,17 +161,8 @@ export default function ProfilePage() {
                     text-align: center;
                     color: #333;
                 }
-                .banner {
-                    padding: 0.6rem 1rem;
-                    border-radius: 6px;
-                    font-weight: 600;
-                    text-align: center;
-                    margin-bottom: 1rem;
-                }
-                .banner.success { background: #e6ffed; color: #0c6c2c; }
-                .banner.error { background: #ffe6e6; color: #a10000; }
 
-                /* Fade-in/out notice */
+                /* Fade-in/out shift notice */
                 .shift-notice {
                     background: #e0f2fe;
                     color: #0369a1;
@@ -198,7 +187,6 @@ export default function ProfilePage() {
                 label {
                     display: flex;
                     flex-direction: column;
-                    align-items: flex-start;
                     font-size: 0.9rem;
                     font-weight: 600;
                     color: #444;
@@ -230,7 +218,7 @@ export default function ProfilePage() {
                 button:hover { background: #005bb5; }
                 button:disabled { background: #ccc; cursor: not-allowed; }
 
-                /* Modal styling */
+                /* Modal */
                 .modal-overlay {
                     position: fixed;
                     top: 0; left: 0; right: 0; bottom: 0;

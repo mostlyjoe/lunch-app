@@ -1,6 +1,7 @@
 ﻿// pages/signup.js
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabaseClient";
+import toast from "react-hot-toast";
 
 export default function Signup() {
   // Form values
@@ -14,11 +15,10 @@ export default function Signup() {
 
   // UI
   const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState(null);
   const [touched, setTouched] = useState({});
   const [loadingAuth, setLoadingAuth] = useState(true);
 
-  // Redirect if user already signed in
+  // ✅ Redirect if user already signed in
   useEffect(() => {
     async function checkUser() {
       const {
@@ -35,12 +35,7 @@ export default function Signup() {
 
   const markTouched = (field) => setTouched((t) => ({ ...t, [field]: true }));
 
-  const showToast = (message, type = "info") => {
-    setToast({ msg: message, type });
-    setTimeout(() => setToast(null), 5000);
-  };
-
-  // Validation helpers
+  // ✅ Validation helpers
   const isEmpty = (v) => String(v).trim().length === 0;
   const isEmailValid = (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim());
   const isNameValid = (v) => /^[A-Za-z' -]+$/.test(v.trim());
@@ -51,8 +46,7 @@ export default function Signup() {
     lastName: touched.lastName && (!isNameValid(lastName) || isEmpty(lastName)),
     shift: touched.shift && isEmpty(shift),
     pin: touched.pin && !/^\d{6}$/.test(pin),
-    confirmPin:
-      touched.confirmPin && (confirmPin !== pin || isEmpty(confirmPin)),
+    confirmPin: touched.confirmPin && (confirmPin !== pin || isEmpty(confirmPin)),
   };
 
   const pinMessage =
@@ -84,6 +78,7 @@ export default function Signup() {
     return "input";
   };
 
+  // ✅ Signup handler with unified toasts
   async function handleSignup(e) {
     e.preventDefault();
     if (!formValid || loading) return;
@@ -109,22 +104,22 @@ export default function Signup() {
       const result = await res.json();
 
       if (!res.ok) {
-        showToast(result.message || "Signup failed.", "error");
+        toast.error(result.message || "Signup failed.");
         setLoading(false);
         return;
       }
 
-      // ✅ Updated success message for verified-email flow
-      showToast(
-        "✅ Account created! Please check your email to verify before logging in.",
-        "success"
+      // ✅ Success toast using global style
+      toast.success(
+        "Account created! Please check your email to verify before logging in."
       );
 
+      // ✅ Redirect after 3s
       setTimeout(() => {
         window.location.href = "/login";
-      }, 4000);
+      }, 3000);
     } catch (err) {
-      showToast("Network error. Please try again.", "error");
+      toast.error("Network error. Please try again.");
       setLoading(false);
     }
   }
@@ -251,8 +246,6 @@ export default function Signup() {
         </form>
       </div>
 
-      {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
-
       <style jsx>{`
         .signup-container {
           display: flex;
@@ -371,29 +364,6 @@ export default function Signup() {
             opacity: 1;
             transform: scale(1);
           }
-        }
-        .toast {
-          position: fixed;
-          top: 1rem;
-          right: 1rem;
-          padding: 1rem;
-          border-radius: 6px;
-          font-weight: 600;
-          z-index: 10000;
-          max-width: calc(100% - 2rem);
-          word-wrap: break-word;
-        }
-        .toast.success {
-          background: #e6ffed;
-          color: #0c6c2c;
-        }
-        .toast.error {
-          background: #ffe6e6;
-          color: #a10000;
-        }
-        .toast.info {
-          background: #e6f0ff;
-          color: #004085;
         }
         @media (max-width: 480px) {
           .card {

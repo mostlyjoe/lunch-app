@@ -8,7 +8,7 @@ import {
     getUserOrderForItem,
     calculateOrderTotals,
 } from "../../lib/db/orders";
-import toast, { Toaster } from "react-hot-toast";
+import toast from "react-hot-toast";
 
 export default function OrderMenuItemPage() {
     const router = useRouter();
@@ -37,6 +37,7 @@ export default function OrderMenuItemPage() {
             const menuItem = await getMenuItemById(id);
             setItem(menuItem);
 
+            // ✅ Calculate deadline color and status
             if (menuItem?.order_deadline) {
                 const now = new Date();
                 const deadline = new Date(menuItem.order_deadline);
@@ -52,6 +53,7 @@ export default function OrderMenuItemPage() {
                 }
             }
 
+            // ✅ Load existing order (if any)
             const userOrder = await getUserOrderForItem(userData.user.id, id);
             if (userOrder) {
                 setExistingOrder(userOrder);
@@ -115,7 +117,7 @@ export default function OrderMenuItemPage() {
 
             await upsertOrder(orderPayload);
 
-            // ✅ Clear, centered toast
+            // ✅ Clear, readable toast
             if (existingOrder) {
                 const oldQty = existingOrder.quantity;
                 const newQty = quantity;
@@ -126,9 +128,11 @@ export default function OrderMenuItemPage() {
                 toast.success(`Your order for ${item.title} was placed!`);
             }
 
-            // ✅ Redirect to /menu after 1s
+            // ✅ Redirect to /menu with query for toast display
             setTimeout(() => {
-                router.push("/menu");
+                const status = existingOrder ? "updated" : "created";
+                const itemName = encodeURIComponent(item.title);
+                router.push(`/menu?placed=${status}&item=${itemName}`);
             }, 1000);
         } catch (err) {
             console.error(err);
@@ -151,23 +155,6 @@ export default function OrderMenuItemPage() {
 
     return (
         <main className="order-item-page">
-            {/* Toast container (centered) */}
-            <Toaster
-                position="top-center"
-                toastOptions={{
-                    duration: 3000,
-                    style: {
-                        fontSize: "1rem",
-                        background: "#fff",
-                        color: "#222",
-                        padding: "0.75rem 1.25rem",
-                        borderRadius: "8px",
-                        border: "1px solid #ddd",
-                        boxShadow: "0 3px 6px rgba(0,0,0,0.1)",
-                    },
-                }}
-            />
-
             <div className="order-card">
                 <div className="image-wrapper">
                     {item.image_url ? (
