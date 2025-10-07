@@ -8,7 +8,7 @@ import {
     getUserOrderForItem,
     calculateOrderTotals,
 } from "../../lib/db/orders";
-import toast from "react-hot-toast";
+import toast, { Toaster } from "react-hot-toast";
 
 export default function OrderMenuItemPage() {
     const router = useRouter();
@@ -115,7 +115,7 @@ export default function OrderMenuItemPage() {
 
             await upsertOrder(orderPayload);
 
-            // ✅ Dynamic toast messages
+            // ✅ Clear, centered toast
             if (existingOrder) {
                 const oldQty = existingOrder.quantity;
                 const newQty = quantity;
@@ -126,7 +126,7 @@ export default function OrderMenuItemPage() {
                 toast.success(`Your order for ${item.title} was placed!`);
             }
 
-            // ✅ Redirect to /menu after 1 second
+            // ✅ Redirect to /menu after 1s
             setTimeout(() => {
                 router.push("/menu");
             }, 1000);
@@ -151,6 +151,23 @@ export default function OrderMenuItemPage() {
 
     return (
         <main className="order-item-page">
+            {/* Toast container (centered) */}
+            <Toaster
+                position="top-center"
+                toastOptions={{
+                    duration: 3000,
+                    style: {
+                        fontSize: "1rem",
+                        background: "#fff",
+                        color: "#222",
+                        padding: "0.75rem 1.25rem",
+                        borderRadius: "8px",
+                        border: "1px solid #ddd",
+                        boxShadow: "0 3px 6px rgba(0,0,0,0.1)",
+                    },
+                }}
+            />
+
             <div className="order-card">
                 <div className="image-wrapper">
                     {item.image_url ? (
