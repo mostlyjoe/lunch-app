@@ -50,7 +50,6 @@ export default function Navigation() {
         setUser(null);
         setIsAdmin(false);
         setMenuOpen(false);
-        // ✅ Redirect to homepage after logout
         window.location.href = "/";
     }
 
@@ -79,27 +78,39 @@ export default function Navigation() {
                     <div className="nav-links">
                         {!user && (
                             <>
-                                <Link href="/login">Sign In</Link>
-                                <Link href="/signup">Sign Up</Link>
+                                <Link href="/login" onClick={closeMenu}>Sign In</Link>
+                                <Link href="/signup" onClick={closeMenu}>Sign Up</Link>
                             </>
                         )}
                         {user && !isAdmin && (
                             <>
-                                <Link href="/menu">Menu</Link>
-                                <Link href="/orders">My Orders</Link>
-                                <Link href="/profile">Profile</Link>
-                                <button onClick={handleSignOut} className="link-button">
+                                <Link href="/menu" onClick={closeMenu}>Menu</Link>
+                                <Link href="/orders" onClick={closeMenu}>My Orders</Link>
+                                <Link href="/profile" onClick={closeMenu}>Profile</Link>
+                                <button
+                                    onClick={() => {
+                                        handleSignOut();
+                                        closeMenu();
+                                    }}
+                                    className="link-button"
+                                >
                                     Sign Out
                                 </button>
                             </>
                         )}
                         {user && isAdmin && (
                             <>
-                                <Link href="/menu">Menu</Link>
-                                <Link href="/admin/menu">Menu Management</Link>
-                                <Link href="/admin/orders-by-shift">Orders by Shift</Link>
-                                <Link href="/admin/profiles">User Profiles</Link>
-                                <button onClick={handleSignOut} className="link-button">
+                                <Link href="/menu" onClick={closeMenu}>Menu</Link>
+                                <Link href="/admin/menu" onClick={closeMenu}>Menu Management</Link>
+                                <Link href="/admin/orders-by-shift" onClick={closeMenu}>Orders by Shift</Link>
+                                <Link href="/admin/profiles" onClick={closeMenu}>User Profiles</Link>
+                                <button
+                                    onClick={() => {
+                                        handleSignOut();
+                                        closeMenu();
+                                    }}
+                                    className="link-button"
+                                >
                                     Sign Out
                                 </button>
                             </>
@@ -135,7 +146,13 @@ export default function Navigation() {
                             <Link href="/menu" onClick={closeMenu}>Menu</Link>
                             <Link href="/orders" onClick={closeMenu}>My Orders</Link>
                             <Link href="/profile" onClick={closeMenu}>Profile</Link>
-                            <button onClick={handleSignOut} className="dropdown-signout">
+                            <button
+                                onClick={() => {
+                                    handleSignOut();
+                                    closeMenu();
+                                }}
+                                className="dropdown-signout"
+                            >
                                 Sign Out
                             </button>
                         </>
@@ -146,7 +163,13 @@ export default function Navigation() {
                             <Link href="/admin/menu" onClick={closeMenu}>Menu Management</Link>
                             <Link href="/admin/orders-by-shift" onClick={closeMenu}>Orders by Shift</Link>
                             <Link href="/admin/profiles" onClick={closeMenu}>User Profiles</Link>
-                            <button onClick={handleSignOut} className="dropdown-signout">
+                            <button
+                                onClick={() => {
+                                    handleSignOut();
+                                    closeMenu();
+                                }}
+                                className="dropdown-signout"
+                            >
                                 Sign Out
                             </button>
                         </>
@@ -154,9 +177,9 @@ export default function Navigation() {
                 </div>
             )}
 
+            {/* ✨ Styles preserved exactly */}
             <style jsx>{`
                 @import url("https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap");
-
                 .navbar {
                     background: #fff176;
                     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
@@ -227,7 +250,6 @@ export default function Navigation() {
                     transition: background 0.2s ease;
                 }
                 .link-button:hover { background: #9a0007; }
-
                 .menu-toggle {
                     background: #fff176;
                     border: 2px solid #2e7d32;
