@@ -50,7 +50,7 @@ export default function HomePage() {
                     We’re happy to provide this lunch ordering site exclusively
                     for your company. We hope you’ll take a chance to try it out
                     and enjoy our first featured meal<br />
-                    Our {" "}
+                    {" "}
                     <strong>Thanksgiving Dinner!</strong>
                 </p>
             </div>
