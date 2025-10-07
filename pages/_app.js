@@ -6,11 +6,12 @@ import { useEffect } from "react";
 import { supabase } from "../lib/supabaseClient";
 
 function MyApp({ Component, pageProps }) {
-    // ✅ Keep session state consistent (optional but safe)
+    // ✅ Keep session state consistent (redirect to homepage when logged out)
     useEffect(() => {
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
             if (event === "SIGNED_OUT") {
-                window.location.href = "/login";
+                // ✅ Redirect to homepage instead of login
+                window.location.href = "/";
             }
         });
 
