@@ -67,7 +67,7 @@ export default function Navigation() {
                         aria-label="Go to home or menu"
                     >
                         <div className="logo-inner">
-                            <span className="logo-text">LittlePorkStop</span>
+                            <span className="logo-text">Little Pork Stop</span>
                         </div>
                     </Link>
                 </div>
