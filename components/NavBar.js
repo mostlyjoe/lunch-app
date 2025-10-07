@@ -7,7 +7,7 @@ export default function Navigation() {
     const [user, setUser] = useState(null);
     const [isAdmin, setIsAdmin] = useState(false);
     const [menuOpen, setMenuOpen] = useState(false);
-    const [viewportKey, setViewportKey] = useState(0); // 🔧 used to force re-render on fold/unfold
+    const [viewportKey, setViewportKey] = useState(0);
 
     useEffect(() => setHasMounted(true), []);
 
@@ -33,10 +33,9 @@ export default function Navigation() {
         fetchUser();
     }, []);
 
-    // ✅ Detect fold/unfold or viewport height change
+    // 🔧 Handle foldable / viewport height change
     useEffect(() => {
         const handleResize = () => {
-            // Trigger a lightweight re-render when viewport height changes
             setViewportKey((prev) => prev + 1);
         };
         window.addEventListener("resize", handleResize);
@@ -174,16 +173,16 @@ export default function Navigation() {
             <style jsx>{`
         @import url("https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap");
 
+        /* ---------- NAVBAR ---------- */
         .navbar {
           background: #fff176;
           box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-          position: fixed; /* ✅ Always visible */
+          position: fixed;
           top: env(safe-area-inset-top, 0);
           left: 0;
           right: 0;
-          z-index: 9999; /* stay above folding UI */
+          z-index: 9999;
           width: 100%;
-          transition: top 0.2s ease;
         }
 
         .navbar-inner {
@@ -209,6 +208,7 @@ export default function Navigation() {
           gap: 1rem;
         }
 
+        /* ---------- LOGO ---------- */
         .logo-inner {
           background: linear-gradient(135deg, #ffeb3b 0%, #ffd54f 100%);
           padding: 0.4rem 1.4rem;
@@ -230,6 +230,7 @@ export default function Navigation() {
           letter-spacing: 1.5px;
         }
 
+        /* ---------- LINKS ---------- */
         .nav-links {
           display: flex;
           gap: 1.1rem;
@@ -251,13 +252,14 @@ export default function Navigation() {
           border-radius: 6px;
           padding: 0.4rem 0.8rem;
           cursor: pointer;
+          font-family: "Roboto", sans-serif;
           transition: background 0.2s ease;
         }
         .link-button:hover {
           background: #9a0007;
         }
 
-        /* ✅ Animated Hamburger with green outline */
+        /* ---------- HAMBURGER ---------- */
         .menu-toggle {
           background: #fff176;
           border: 2px solid #2e7d32;
@@ -274,14 +276,25 @@ export default function Navigation() {
           position: relative;
         }
 
+        /* ✅ Lock colors through all states */
+        .menu-toggle:hover,
+        .menu-toggle:focus,
+        .menu-toggle:active,
+        .menu-toggle.open {
+          background: #fff176 !important;
+          border-color: #2e7d32 !important;
+          box-shadow: 0 0 6px rgba(46, 125, 50, 0.5);
+        }
+
         .bar {
           width: 22px;
           height: 3px;
-          background-color: #2e7d32;
+          background-color: #2e7d32 !important;
           border-radius: 2px;
           transition: all 0.3s ease;
         }
 
+        /* Animate into X */
         .menu-toggle.open .top {
           transform: translateY(8px) rotate(45deg);
         }
@@ -292,10 +305,7 @@ export default function Navigation() {
           transform: translateY(-8px) rotate(-45deg);
         }
 
-        .menu-toggle:hover {
-          box-shadow: 0 0 6px rgba(46, 125, 50, 0.5);
-        }
-
+        /* ---------- MOBILE MENU ---------- */
         .mobile-menu {
           background: #fff176;
           display: none;
