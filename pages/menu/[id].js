@@ -163,6 +163,11 @@ export default function OrderMenuItemPage() {
         <div className="order-body">
           <h1 className="order-title">{item.title}</h1>
 
+          {/* 📝 Description restored under title */}
+          {item.description && (
+            <p className="order-desc">{item.description}</p>
+          )}
+
           <p className="order-serve">
             <strong>Served:</strong> {formatServeDate(item.serve_date)}
           </p>
@@ -235,11 +240,7 @@ export default function OrderMenuItemPage() {
                 </div>
               </div>
 
-              <button
-                type="submit"
-                disabled={saving}
-                className="btn-primary"
-              >
+              <button type="submit" disabled={saving} className="btn-primary">
                 {saving
                   ? "Saving..."
                   : existingOrder
@@ -312,6 +313,16 @@ export default function OrderMenuItemPage() {
           margin-bottom: 0.5rem;
           color: #c62828;
           text-align: center;
+        }
+        .order-desc {
+          text-align: center;
+          color: #444;
+          font-size: 0.98rem;
+          line-height: 1.4;
+          margin: 0.25rem 0 0.75rem;
+          max-width: 480px;
+          margin-left: auto;
+          margin-right: auto;
         }
         .order-serve {
           margin-bottom: 0.5rem;
@@ -445,6 +456,9 @@ export default function OrderMenuItemPage() {
           }
           .order-title {
             font-size: 1.3rem;
+          }
+          .order-desc {
+            font-size: 0.92rem;
           }
         }
       `}</style>

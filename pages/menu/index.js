@@ -212,15 +212,6 @@ export default function MenuPage() {
                 const pillClass = `pill ${pillVariant(sharedDeadline)}`;
                 const allExpired = visibleItems.every((m) => isExpired(m));
 
-                const serveDate = parseYMDLocal(dateKey);
-                const serveDateText = serveDate
-                    ? serveDate.toLocaleDateString(undefined, {
-                          month: "short",
-                          day: "numeric",
-                          year: "numeric",
-                      })
-                    : "";
-
                 return (
                     <section className="date-card" key={dateKey}>
                         <div className="date-card-header">
@@ -228,7 +219,10 @@ export default function MenuPage() {
                             <p className="date-sub">
                                 {allExpired ? (
                                     <span className="pill red">
-                                        Order Closed after 11:59 PM {serveDateText}
+                                        Order Closed after{" "}
+                                        {friendlyDateTime(
+                                            deadlines[deadlines.length - 1]
+                                        )}
                                     </span>
                                 ) : sharedDeadline ? (
                                     <span className={pillClass}>
@@ -269,9 +263,7 @@ export default function MenuPage() {
                                         </div>
                                         <div className="tile-body">
                                             <div className="tile-title">{m.title}</div>
-                                            <div className="tile-desc" title={m.description}>
-                                                {m.description}
-                                            </div>
+                                            {/* Description removed per final design */}
                                         </div>
                                         <div className="tile-footer">
                                             <div className="price">
@@ -456,14 +448,6 @@ export default function MenuPage() {
                     font-size: 1rem;
                     margin-bottom: 0.25rem;
                     color: #d32f2f;
-                }
-                .tile-desc {
-                    font-size: 0.93rem;
-                    color: #555;
-                    display: -webkit-box;
-                    -webkit-line-clamp: 3;
-                    -webkit-box-orient: vertical;
-                    overflow: hidden;
                 }
 
                 .tile-footer {
