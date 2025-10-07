@@ -45,11 +45,12 @@ export default function HomePage() {
     return (
         <main className="home-container">
             <div className="welcome-section">
-                <h1>Welcome to LunchApp!</h1>
+                <h1>Welcome!</h1>
                 <p>
-                    We’re happy to provide this lunch ordering app exclusively
+                    We’re happy to provide this lunch ordering site exclusively
                     for your company. We hope you’ll take a chance to try it out
-                    and enjoy our first featured meal — the{" "}
+                    and enjoy our first featured meal<br />
+                    Our {" "}
                     <strong>Thanksgiving Dinner!</strong>
                 </p>
             </div>
