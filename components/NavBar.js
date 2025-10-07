@@ -1,13 +1,13 @@
 ﻿import Link from "next/link";
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabaseClient";
-import { Bars3Icon } from "@heroicons/react/24/solid";
 
 export default function Navigation() {
     const [hasMounted, setHasMounted] = useState(false);
     const [user, setUser] = useState(null);
     const [isAdmin, setIsAdmin] = useState(false);
     const [menuOpen, setMenuOpen] = useState(false);
+    const [viewportKey, setViewportKey] = useState(0); // 🔧 used to force re-render on fold/unfold
 
     useEffect(() => setHasMounted(true), []);
 
@@ -33,7 +33,17 @@ export default function Navigation() {
         fetchUser();
     }, []);
 
-    if (!hasMounted) return null; // ✅ prevents hydration mismatch
+    // ✅ Detect fold/unfold or viewport height change
+    useEffect(() => {
+        const handleResize = () => {
+            // Trigger a lightweight re-render when viewport height changes
+            setViewportKey((prev) => prev + 1);
+        };
+        window.addEventListener("resize", handleResize);
+        return () => window.removeEventListener("resize", handleResize);
+    }, []);
+
+    if (!hasMounted) return null;
 
     async function handleSignOut() {
         await supabase.auth.signOut();
@@ -44,17 +54,18 @@ export default function Navigation() {
     }
 
     const closeMenu = () => setMenuOpen(false);
+    const logoLink = user ? "/menu" : "/";
 
     return (
-        <nav className="navbar">
+        <nav key={viewportKey} className="navbar">
             <div className="navbar-inner">
                 {/* CENTER (Logo) */}
                 <div className="nav-center">
                     <Link
-                        href="/menu"
+                        href={logoLink}
                         onClick={closeMenu}
                         className="logo-box"
-                        aria-label="Go to Menu"
+                        aria-label="Go to home or menu"
                     >
                         <div className="logo-inner">
                             <span className="logo-text">LittlePorkStop</span>
@@ -71,7 +82,6 @@ export default function Navigation() {
                                 <Link href="/signup">Sign Up</Link>
                             </>
                         )}
-
                         {user && !isAdmin && (
                             <>
                                 <Link href="/menu">Menu</Link>
@@ -82,7 +92,6 @@ export default function Navigation() {
                                 </button>
                             </>
                         )}
-
                         {user && isAdmin && (
                             <>
                                 <Link href="/menu">Menu</Link>
@@ -96,29 +105,22 @@ export default function Navigation() {
                         )}
                     </div>
 
-                    {/* Hamburger (always far right) */}
+                    {/* Animated Hamburger */}
                     <button
-                        className="menu-toggle"
+                        className={`menu-toggle ${menuOpen ? "open" : ""}`}
                         onClick={() => setMenuOpen((v) => !v)}
                         aria-label="Toggle menu"
                         aria-expanded={menuOpen}
                         aria-controls="mobile-menu"
                     >
-                        <Bars3Icon
-                            style={{
-                                color: "#ffffff",
-                                fill: "#ffffff",
-                                stroke: "#ffffff",
-                                strokeWidth: "2px",
-                                width: "28px",
-                                height: "28px",
-                            }}
-                        />
+                        <span className="bar top"></span>
+                        <span className="bar middle"></span>
+                        <span className="bar bottom"></span>
                     </button>
                 </div>
             </div>
 
-            {/* MOBILE DROPDOWN */}
+            {/* MOBILE MENU */}
             {menuOpen && (
                 <div id="mobile-menu" className="mobile-menu">
                     {!user && (
@@ -131,7 +133,6 @@ export default function Navigation() {
                             </Link>
                         </>
                     )}
-
                     {user && !isAdmin && (
                         <>
                             <Link href="/menu" onClick={closeMenu}>
@@ -148,7 +149,6 @@ export default function Navigation() {
                             </button>
                         </>
                     )}
-
                     {user && isAdmin && (
                         <>
                             <Link href="/menu" onClick={closeMenu}>
@@ -177,18 +177,20 @@ export default function Navigation() {
         .navbar {
           background: #fff176;
           box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-          position: sticky;
-          top: 0;
-          z-index: 100;
+          position: fixed; /* ✅ Always visible */
+          top: env(safe-area-inset-top, 0);
+          left: 0;
+          right: 0;
+          z-index: 9999; /* stay above folding UI */
           width: 100%;
+          transition: top 0.2s ease;
         }
 
         .navbar-inner {
           display: grid;
-          grid-template-columns: 1fr auto; /* logo center, right section flexible */
+          grid-template-columns: 1fr auto;
           align-items: center;
           padding: 0.6rem 1rem;
-          gap: 0.5rem;
         }
 
         .nav-center {
@@ -205,12 +207,8 @@ export default function Navigation() {
           align-items: center;
           justify-content: flex-end;
           gap: 1rem;
-          margin-left: auto;
         }
 
-        .logo-box {
-          text-decoration: none;
-        }
         .logo-inner {
           background: linear-gradient(135deg, #ffeb3b 0%, #ffd54f 100%);
           padding: 0.4rem 1.4rem;
@@ -239,7 +237,6 @@ export default function Navigation() {
         }
         .nav-links a {
           color: #b71c1c;
-          font-weight: 400;
           text-decoration: none;
           transition: color 0.2s ease;
         }
@@ -254,23 +251,49 @@ export default function Navigation() {
           border-radius: 6px;
           padding: 0.4rem 0.8rem;
           cursor: pointer;
-          font-family: "Roboto", sans-serif;
-          font-weight: 400;
           transition: background 0.2s ease;
         }
         .link-button:hover {
           background: #9a0007;
         }
 
+        /* ✅ Animated Hamburger with green outline */
         .menu-toggle {
-          background: #b71c1c;
-          border: none;
+          background: #fff176;
+          border: 2px solid #2e7d32;
+          border-radius: 8px;
           width: 44px;
           height: 44px;
-          display: none; /* show only on mobile */
+          display: none;
           align-items: center;
           justify-content: center;
+          flex-direction: column;
+          gap: 5px;
           cursor: pointer;
+          transition: all 0.3s ease;
+          position: relative;
+        }
+
+        .bar {
+          width: 22px;
+          height: 3px;
+          background-color: #2e7d32;
+          border-radius: 2px;
+          transition: all 0.3s ease;
+        }
+
+        .menu-toggle.open .top {
+          transform: translateY(8px) rotate(45deg);
+        }
+        .menu-toggle.open .middle {
+          opacity: 0;
+        }
+        .menu-toggle.open .bottom {
+          transform: translateY(-8px) rotate(-45deg);
+        }
+
+        .menu-toggle:hover {
+          box-shadow: 0 0 6px rgba(46, 125, 50, 0.5);
         }
 
         .mobile-menu {
@@ -281,15 +304,14 @@ export default function Navigation() {
           gap: 1rem;
           padding: 1rem 0 1.25rem;
           border-top: 1px solid #f1f1f1;
-          font-family: "Roboto", sans-serif;
           animation: slideDown 0.25s ease forwards;
         }
+
         .mobile-menu a {
           text-decoration: none;
           color: #b71c1c;
-          font-weight: 400;
-          font-size: 1rem;
         }
+
         .dropdown-signout {
           background: #b71c1c;
           color: #fff;
@@ -297,21 +319,17 @@ export default function Navigation() {
           border-radius: 6px;
           padding: 0.5rem 1rem;
           cursor: pointer;
-          font-weight: 400;
-        }
-        .dropdown-signout:hover {
-          background: #9a0007;
         }
 
         @media (max-width: 900px) {
           .nav-links {
-            display: none; /* hide links */
+            display: none;
           }
           .menu-toggle {
-            display: inline-flex; /* show hamburger */
+            display: inline-flex;
           }
           .mobile-menu {
-            display: flex; /* visible when open */
+            display: flex;
           }
         }
 
