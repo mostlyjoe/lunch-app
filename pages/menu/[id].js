@@ -114,13 +114,18 @@ export default function OrderMenuItemPage() {
             };
 
             await upsertOrder(orderPayload);
+
+            // ✅ Show concise toast confirmation
             toast.success(
                 existingOrder
-                    ? `✅ Order updated (${quantity}x ${item.title})`
-                    : `✅ Order placed (${quantity}x ${item.title})`
+                    ? `Your order for ${item.title} was updated.`
+                    : `Your order for ${item.title} was placed!`
             );
 
-            await fetchData(); // stay on page and refresh
+            // ✅ Redirect to /menu after 1 second
+            setTimeout(() => {
+                router.push("/menu");
+            }, 1000);
         } catch (err) {
             console.error(err);
             toast.error("Failed to save order ❌");
