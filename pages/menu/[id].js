@@ -115,12 +115,16 @@ export default function OrderMenuItemPage() {
 
             await upsertOrder(orderPayload);
 
-            // ✅ Show concise toast confirmation
-            toast.success(
-                existingOrder
-                    ? `Your order for ${item.title} was updated.`
-                    : `Your order for ${item.title} was placed!`
-            );
+            // ✅ Dynamic toast messages
+            if (existingOrder) {
+                const oldQty = existingOrder.quantity;
+                const newQty = quantity;
+                toast.success(
+                    `Your order for ${item.title} was updated (${oldQty} → ${newQty}).`
+                );
+            } else {
+                toast.success(`Your order for ${item.title} was placed!`);
+            }
 
             // ✅ Redirect to /menu after 1 second
             setTimeout(() => {
@@ -166,8 +170,9 @@ export default function OrderMenuItemPage() {
                     {item.order_deadline && (
                         <div className="deadline-pill-row">
                             <span
-                                className={`deadline-pill ${deadlinePassed ? "closed" : deadlineVariant
-                                    }`}
+                                className={`deadline-pill ${
+                                    deadlinePassed ? "closed" : deadlineVariant
+                                }`}
                             >
                                 {deadlinePassed
                                     ? "Order Closed"
@@ -196,7 +201,9 @@ export default function OrderMenuItemPage() {
                                     max="10"
                                     value={quantity}
                                     onChange={(e) =>
-                                        setQuantity(Math.max(1, Math.min(10, e.target.value)))
+                                        setQuantity(
+                                            Math.max(1, Math.min(10, e.target.value))
+                                        )
                                     }
                                 />
                                 <button
@@ -234,8 +241,8 @@ export default function OrderMenuItemPage() {
                                 {saving
                                     ? "Saving..."
                                     : existingOrder
-                                        ? "Update Order"
-                                        : "Place Order"}
+                                    ? "Update Order"
+                                    : "Place Order"}
                             </button>
                         </form>
                     )}
