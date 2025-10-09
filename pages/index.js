@@ -47,7 +47,7 @@ export default function HomePage() {
         <h1>Welcome!</h1>
         <p>
           We’re happy to provide this lunch ordering site exclusively
-          for your Ampacet. We hope you’ll take a chance to try it out
+          for Ampacet. We hope you’ll take a chance to try it out
           and enjoy our first featured meal <br />
           <strong>Thanksgiving Dinner!</strong>
         </p>
