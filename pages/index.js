@@ -53,7 +53,7 @@ export default function HomePage() {
         </p>
       </div>
 
-      {/* ✅ Flyer image always visible on desktop and mobile */}
+      {/* ✅ Flyer image - always visible, unoptimized for reliability */}
       <div className="image-wrapper">
         <Image
           src="/lpsturkeyapp.jpg"
@@ -61,11 +61,13 @@ export default function HomePage() {
           width={800}
           height={800}
           priority
+          unoptimized // prevents optimizer errors on large images
           style={{
             width: "100%",
             height: "auto",
             objectFit: "contain",
             display: "block",
+            borderRadius: "12px",
           }}
         />
       </div>
@@ -117,15 +119,17 @@ export default function HomePage() {
           overflow: hidden;
           box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
           display: block;
-          min-height: 300px; /* ✅ ensures visible height on desktop */
+          min-height: 300px; /* ensures container never collapses */
         }
 
-        /* Remove global img rule — Next.js Image handles its own sizing */
+        /* No global img rule — Next.js Image handles scaling */
+
         .button-row {
           display: flex;
           justify-content: center;
           gap: 1rem;
           flex-wrap: wrap;
+          margin-top: 1rem;
         }
 
         .btn {
