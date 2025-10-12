@@ -75,7 +75,10 @@ export default function AdminProfilesPage() {
                         </thead>
                         <tbody>
                             {profiles.map((profile) => (
-                                <tr key={profile.id}>
+                                <tr
+                                    key={profile.id}
+                                    className={profile.is_admin ? "admin-row" : ""}
+                                >
                                     <td className="uid">{profile.id}</td>
                                     <td>
                                         <input
@@ -165,17 +168,19 @@ export default function AdminProfilesPage() {
                                         >
                                             Save
                                         </button>
-                                        <button
-                                            className="btn delete"
-                                            onClick={() => {
-                                                setConfirmUserId(profile.id);
-                                                setConfirmUserName(
-                                                    `${profile.first_name} ${profile.last_name}`
-                                                );
-                                            }}
-                                        >
-                                            Delete
-                                        </button>
+                                        {!profile.is_admin && (
+                                            <button
+                                                className="btn delete"
+                                                onClick={() => {
+                                                    setConfirmUserId(profile.id);
+                                                    setConfirmUserName(
+                                                        `${profile.first_name} ${profile.last_name}`
+                                                    );
+                                                }}
+                                            >
+                                                Delete
+                                            </button>
+                                        )}
                                     </td>
                                 </tr>
                             ))}
@@ -267,6 +272,11 @@ export default function AdminProfilesPage() {
         .badge.user {
           background: #ffe6e6;
           color: #a10000;
+        }
+        .admin-row {
+          outline: 2px solid #2196f3;
+          outline-offset: -3px;
+          background: #f0f8ff;
         }
         .btn {
           padding: 0.5rem 1rem;
