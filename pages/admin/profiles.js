@@ -1,5 +1,4 @@
 ﻿import { useEffect, useState } from "react";
-import { getAllProfiles } from "../../lib/db/profiles";
 
 export default function AdminProfilesPage() {
     const [profiles, setProfiles] = useState([]);
@@ -8,7 +7,9 @@ export default function AdminProfilesPage() {
     useEffect(() => {
         async function loadProfiles() {
             try {
-                const allProfiles = await getAllProfiles();
+                const res = await fetch("/api/admin/getProfiles");
+                if (!res.ok) throw new Error("Failed to load profiles");
+                const allProfiles = await res.json();
                 setProfiles(allProfiles);
             } catch (err) {
                 showToast("❌ Failed to load profiles: " + err.message, "error");
@@ -22,7 +23,7 @@ export default function AdminProfilesPage() {
         setTimeout(() => setToast(null), 4000);
     }
 
-    // Group and sort profiles by shift (sorted by last name, then first name)
+    // Group and sort profiles by shift (excluding admins)
     const groupAndSortProfiles = (profiles) => {
         const groups = {
             morning: [],
@@ -32,8 +33,10 @@ export default function AdminProfilesPage() {
         };
 
         profiles.forEach((p) => {
-            const shift = p.shift_type || "unassigned";
-            if (groups[shift]) groups[shift].push(p);
+            if (!p.is_admin) {
+                const shift = p.shift_type || "unassigned";
+                if (groups[shift]) groups[shift].push(p);
+            }
         });
 
         // Sort each group alphabetically by last name, then first name
@@ -55,6 +58,20 @@ export default function AdminProfilesPage() {
         return groups;
     };
 
+    const admins = profiles
+        .filter((p) => p.is_admin)
+        .sort((a, b) => {
+            const lastA = (a.last_name || "").toLowerCase();
+            const lastB = (b.last_name || "").toLowerCase();
+            const firstA = (a.first_name || "").toLowerCase();
+            const firstB = (b.first_name || "").toLowerCase();
+            if (lastA < lastB) return -1;
+            if (lastA > lastB) return 1;
+            if (firstA < firstB) return -1;
+            if (firstA > firstB) return 1;
+            return 0;
+        });
+
     const grouped = groupAndSortProfiles(profiles);
 
     return (
@@ -62,6 +79,41 @@ export default function AdminProfilesPage() {
             <div className="card">
                 <h2>Admin: All User Profiles (Read Only)</h2>
 
+                {/* Admins Section */}
+                <div className="admins-section">
+                    <h3 className="admins-header">
+                        Admins ({admins.length})
+                    </h3>
+
+                    {admins.length === 0 ? (
+                        <p>No admins found.</p>
+                    ) : (
+                        <table className="profiles-table">
+                            <thead>
+                                <tr>
+                                    <th>First Name</th>
+                                    <th>Last Name</th>
+                                    <th>Email</th>
+                                    <th>Company</th>
+                                    <th>Shift</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {admins.map((profile) => (
+                                    <tr key={profile.id} className="admin-row">
+                                        <td>{profile.first_name || "-"}</td>
+                                        <td>{profile.last_name || "-"}</td>
+                                        <td>{profile.email || "-"}</td>
+                                        <td>{profile.company_name || "-"}</td>
+                                        <td>{profile.shift_type || "-"}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+
+                {/* Users Grouped by Shift */}
                 {profiles.length === 0 ? (
                     <p>No profiles found.</p>
                 ) : (
@@ -82,32 +134,17 @@ export default function AdminProfilesPage() {
                                         <tr>
                                             <th>First Name</th>
                                             <th>Last Name</th>
+                                            <th>Email</th>
                                             <th>Company</th>
-                                            <th>Role</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {users.map((profile) => (
-                                            <tr
-                                                key={profile.id}
-                                                className={
-                                                    profile.is_admin ? "admin-row" : ""
-                                                }
-                                            >
+                                            <tr key={profile.id}>
                                                 <td>{profile.first_name || "-"}</td>
                                                 <td>{profile.last_name || "-"}</td>
+                                                <td>{profile.email || "-"}</td>
                                                 <td>{profile.company_name || "-"}</td>
-                                                <td>
-                                                    <span
-                                                        className={`badge ${
-                                                            profile.is_admin ? "admin" : "user"
-                                                        }`}
-                                                    >
-                                                        {profile.is_admin
-                                                            ? "Admin ✅"
-                                                            : "User"}
-                                                    </span>
-                                                </td>
                                             </tr>
                                         ))}
                                     </tbody>
@@ -136,6 +173,19 @@ export default function AdminProfilesPage() {
                     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
                     width: 100%;
                     max-width: 1000px;
+                }
+                .admins-section {
+                    margin-bottom: 2rem;
+                    border-bottom: 2px solid #e0e0e0;
+                    padding-bottom: 1.5rem;
+                }
+                .admins-header {
+                    background: #d1ecf1;
+                    padding: 0.6rem 1rem;
+                    border-left: 4px solid #0c5460;
+                    border-radius: 4px;
+                    font-size: 1.1rem;
+                    margin-bottom: 0.5rem;
                 }
                 .shift-section {
                     margin-bottom: 2rem;
