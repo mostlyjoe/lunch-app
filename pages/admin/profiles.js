@@ -80,7 +80,6 @@ export default function AdminProfilesPage() {
                                 <table className="profiles-table">
                                     <thead>
                                         <tr>
-                                            <th>Email</th>
                                             <th>First Name</th>
                                             <th>Last Name</th>
                                             <th>Company</th>
@@ -95,7 +94,6 @@ export default function AdminProfilesPage() {
                                                     profile.is_admin ? "admin-row" : ""
                                                 }
                                             >
-                                                <td>{profile.email}</td>
                                                 <td>{profile.first_name || "-"}</td>
                                                 <td>{profile.last_name || "-"}</td>
                                                 <td>{profile.company_name || "-"}</td>
