@@ -9,7 +9,8 @@ export default function HomePage() {
   const [user, setUser] = useState(null);
   const [menuItems, setMenuItems] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const trackRef = useRef(null);
+  const [showHint, setShowHint] = useState(true);
+  const intervalRef = useRef(null);
   const touchStartX = useRef(0);
   const touchEndX = useRef(0);
 
@@ -34,7 +35,7 @@ export default function HomePage() {
     checkUser();
   }, [router]);
 
-  // Fetch active menu items
+  // Fetch menu items
   useEffect(() => {
     async function fetchMenuItems() {
       const { data, error } = await supabase
@@ -48,37 +49,47 @@ export default function HomePage() {
     fetchMenuItems();
   }, []);
 
-  // Auto-advance one image at a time
+  // Auto scroll with pause on touch
   useEffect(() => {
     if (menuItems.length === 0) return;
-    const interval = setInterval(() => {
+    intervalRef.current = setInterval(() => {
       setCurrentIndex((prev) => (prev + 1) % menuItems.length);
-    }, 1500); // ~0.75s pause + quick slide
-    return () => clearInterval(interval);
+    }, 1800);
+    return () => clearInterval(intervalRef.current);
   }, [menuItems.length]);
+
+  const pauseAutoScroll = () => clearInterval(intervalRef.current);
+  const resumeAutoScroll = () => {
+    clearInterval(intervalRef.current);
+    intervalRef.current = setInterval(() => {
+      setCurrentIndex((prev) => (prev + 1) % menuItems.length);
+    }, 1800);
+  };
 
   // Swipe handlers
   const handleTouchStart = (e) => {
+    pauseAutoScroll();
     touchStartX.current = e.touches[0].clientX;
   };
-  const handleTouchMove = (e) => {
-    touchEndX.current = e.touches[0].clientX;
-  };
+  const handleTouchMove = (e) => (touchEndX.current = e.touches[0].clientX);
   const handleTouchEnd = () => {
     const diff = touchStartX.current - touchEndX.current;
     if (Math.abs(diff) > 50) {
-      // swipe threshold
-      if (diff > 0) {
-        // left swipe
+      if (diff > 0)
         setCurrentIndex((prev) => (prev + 1) % menuItems.length);
-      } else {
-        // right swipe
+      else
         setCurrentIndex(
           (prev) => (prev - 1 + menuItems.length) % menuItems.length
         );
-      }
     }
+    resumeAutoScroll();
   };
+
+  // Hide hint after 2s
+  useEffect(() => {
+    const timer = setTimeout(() => setShowHint(false), 2000);
+    return () => clearTimeout(timer);
+  }, []);
 
   if (checkingAuth) {
     return (
@@ -97,12 +108,14 @@ export default function HomePage() {
       <section className="welcome">
         <h2>Welcome!</h2>
         <p>
-          Browse our latest lunch offerings — swipe left or right to explore
-          what’s cooking! Sign up or log in to order your meal.
+          We’re happy to provide this lunch ordering site exclusively
+          for Ampacet. We hope you’ll take a chance to try it out.<br />
+          Swipe through to see what's cooking, then sign up or log in to place
+          your lunch order.
         </p>
       </section>
 
-      {/* ✅ Single-image swipeable carousel */}
+      {/* Carousel */}
       <section
         className="carousel"
         onTouchStart={handleTouchStart}
@@ -111,31 +124,41 @@ export default function HomePage() {
       >
         <div
           className="carousel-track"
-          ref={trackRef}
-          style={{
-            transform: `translateX(-${currentIndex * 100}%)`,
-          }}
+          style={{ transform: `translateX(-${currentIndex * 100}%)` }}
         >
           {menuItems.map((item, i) => (
             <div key={i} className="carousel-slide">
-              <Image
-                src={item.image_url || "/no-image.png"}
-                alt={item.title}
-                width={600}
-                height={600}
-                loading="lazy"
-                unoptimized
-                style={{
-                  width: "100%",
-                  height: "auto",
-                  objectFit: "contain",
-                  borderRadius: "20px",
-                }}
-              />
+              <div className="img-container">
+                <Image
+                  src={item.image_url || "/no-image.png"}
+                  alt={item.title}
+                  fill
+                  priority={i === 0}
+                  sizes="(max-width: 768px) 90vw, 600px"
+                  style={{ objectFit: "contain", borderRadius: "16px" }}
+                />
+              </div>
               <p className="caption">{item.title}</p>
             </div>
           ))}
         </div>
+
+        {/* Dots indicator */}
+        <div className="dots">
+          {menuItems.map((_, i) => (
+            <span
+              key={i}
+              className={`dot ${i === currentIndex ? "active" : ""}`}
+            ></span>
+          ))}
+        </div>
+
+        {/* Swipe hint */}
+        {showHint && (
+          <div className="swipe-hint">
+            <span>← Swipe →</span>
+          </div>
+        )}
       </section>
 
       <div className="button-row">
@@ -189,25 +212,23 @@ export default function HomePage() {
           margin-bottom: 0.5rem;
         }
 
-        .welcome p {
-          font-size: 1.05rem;
-          line-height: 1.6;
-        }
-
         .carousel {
-          position: relative;
           width: 100%;
-          max-width: 700px;
-          margin: 2rem 0;
+          max-width: 650px;
+          margin: 1.5rem auto;
           overflow: hidden;
-          border-radius: 20px;
+          border-radius: 16px;
+          position: relative;
+          height: 45vh;
+          max-height: 350px;
           touch-action: pan-y;
         }
 
         .carousel-track {
           display: flex;
-          transition: transform 0.4s ease-in-out;
+          transition: transform 0.45s cubic-bezier(0.33, 1, 0.68, 1);
           width: 100%;
+          height: 100%;
         }
 
         .carousel-slide {
@@ -215,18 +236,78 @@ export default function HomePage() {
           display: flex;
           flex-direction: column;
           align-items: center;
+          justify-content: center;
+        }
+
+        .img-container {
+          position: relative;
+          width: 100%;
+          height: 100%;
+          background: #fff;
+          border-radius: 16px;
         }
 
         .caption {
-          margin-top: 0.5rem;
+          margin-top: 0.4rem;
           font-weight: 600;
           color: #444;
+          font-size: 1rem;
+        }
+
+        .dots {
+          position: absolute;
+          bottom: 10px;
+          left: 50%;
+          transform: translateX(-50%);
+          display: flex;
+          gap: 6px;
+        }
+
+        .dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: #ccc;
+          opacity: 0.7;
+          transition: all 0.2s ease;
+        }
+
+        .dot.active {
+          background: #d32f2f;
+          transform: scale(1.3);
+          opacity: 1;
+        }
+
+        .swipe-hint {
+          position: absolute;
+          top: 10px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: rgba(255, 255, 255, 0.8);
+          padding: 0.25rem 0.75rem;
+          border-radius: 8px;
+          font-size: 0.8rem;
+          color: #444;
+          animation: fadeOut 2s ease forwards;
+        }
+
+        @keyframes fadeOut {
+          0% {
+            opacity: 1;
+          }
+          80% {
+            opacity: 0.5;
+          }
+          100% {
+            opacity: 0;
+            visibility: hidden;
+          }
         }
 
         .button-row {
           display: flex;
           gap: 1rem;
-          margin-bottom: 2rem;
+          margin: 1.2rem auto 2rem;
           flex-wrap: wrap;
           justify-content: center;
         }
@@ -263,12 +344,19 @@ export default function HomePage() {
           }
         }
 
-        @media (max-width: 600px) {
+        @media (max-width: 768px) {
+          .carousel {
+            height: 35vh;
+            max-height: 280px;
+          }
           .welcome h2 {
             font-size: 1.6rem;
           }
           .welcome p {
             font-size: 0.95rem;
+          }
+          .caption {
+            font-size: 0.9rem;
           }
         }
 
