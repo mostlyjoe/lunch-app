@@ -14,7 +14,7 @@ export default function HomePage() {
   const touchStartX = useRef(0);
   const touchEndX = useRef(0);
 
-  // Auth check
+  // 🔒 Auth check and redirect
   useEffect(() => {
     async function checkUser() {
       const { data } = await supabase.auth.getUser();
@@ -35,7 +35,7 @@ export default function HomePage() {
     checkUser();
   }, [router]);
 
-  // Fetch menu items
+  // 📦 Fetch active menu items
   useEffect(() => {
     async function fetchMenuItems() {
       const { data, error } = await supabase
@@ -49,7 +49,7 @@ export default function HomePage() {
     fetchMenuItems();
   }, []);
 
-  // Auto scroll with pause on touch
+  // 🔁 Auto scroll with pause on touch
   useEffect(() => {
     if (menuItems.length === 0) return;
     intervalRef.current = setInterval(() => {
@@ -66,7 +66,7 @@ export default function HomePage() {
     }, 1800);
   };
 
-  // Swipe handlers
+  // 👆 Swipe handlers
   const handleTouchStart = (e) => {
     pauseAutoScroll();
     touchStartX.current = e.touches[0].clientX;
@@ -85,7 +85,7 @@ export default function HomePage() {
     resumeAutoScroll();
   };
 
-  // Hide hint after 2s
+  // ⏳ Hide swipe hint after 2s
   useEffect(() => {
     const timer = setTimeout(() => setShowHint(false), 2000);
     return () => clearTimeout(timer);
@@ -101,19 +101,16 @@ export default function HomePage() {
 
   return (
     <main className="app-container">
-
-
       <section className="welcome">
         <h2>Welcome!</h2>
         <p>
           We’re happy to provide this lunch ordering site exclusively
-          for Ampacet. We hope you’ll take a chance to try it out.<br />
-          Swipe through to see what's cooking, then sign up or log in to place
-          your order.
+          for Ampacet. Take a look below to see what’s cooking — then sign up or
+          log in to place your order!
         </p>
       </section>
 
-      {/* Carousel */}
+      {/* 🎠 Carousel */}
       <section
         className="carousel"
         onTouchStart={handleTouchStart}
@@ -130,10 +127,16 @@ export default function HomePage() {
                 <Image
                   src={item.image_url || "/no-image.png"}
                   alt={item.title}
-                  fill
+                  width={600}
+                  height={600}
                   priority={i === 0}
                   sizes="(max-width: 768px) 90vw, 600px"
-                  style={{ objectFit: "contain", borderRadius: "16px" }}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "contain",
+                    borderRadius: "16px",
+                  }}
                 />
               </div>
               <p className="caption">{item.title}</p>
@@ -159,6 +162,7 @@ export default function HomePage() {
         )}
       </section>
 
+      {/* 🔘 Buttons */}
       <div className="button-row">
         <button onClick={() => router.push("/signup")} className="btn pulse">
           Sign Up
@@ -178,23 +182,6 @@ export default function HomePage() {
           text-align: center;
           font-family: "Roboto", sans-serif;
           overflow: hidden;
-        }
-
-        .app-header {
-          position: fixed;
-          top: 0;
-          width: 100%;
-          background: #fff176;
-          color: #b71c1c;
-          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
-          padding: 0.75rem 1rem;
-          z-index: 10;
-        }
-
-        .app-header h1 {
-          font-size: 1.4rem;
-          font-family: "Impact", sans-serif;
-          letter-spacing: 0.5px;
         }
 
         .welcome {
@@ -238,11 +225,13 @@ export default function HomePage() {
         }
 
         .img-container {
-          position: relative;
           width: 100%;
           height: 100%;
           background: #fff;
           border-radius: 16px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
         }
 
         .caption {
