@@ -101,9 +101,7 @@ export default function HomePage() {
 
   return (
     <main className="app-container">
-      <header className="app-header">
-        <h1>Little Pork Stop</h1>
-      </header>
+
 
       <section className="welcome">
         <h2>Welcome!</h2>
