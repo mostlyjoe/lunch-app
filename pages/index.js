@@ -8,13 +8,14 @@ export default function HomePage() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [user, setUser] = useState(null);
   const [menuItems, setMenuItems] = useState([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [currentIndex, setCurrentIndex] = useState(1);
   const [showHint, setShowHint] = useState(true);
+  const [transitionEnabled, setTransitionEnabled] = useState(true);
   const intervalRef = useRef(null);
   const touchStartX = useRef(0);
   const touchEndX = useRef(0);
 
-  // 🔒 Auth check and redirect
+  // 🔒 Auth check
   useEffect(() => {
     async function checkUser() {
       const { data } = await supabase.auth.getUser();
@@ -35,7 +36,7 @@ export default function HomePage() {
     checkUser();
   }, [router]);
 
-  // 📦 Fetch active menu items
+  // 📦 Fetch menu items
   useEffect(() => {
     async function fetchMenuItems() {
       const { data, error } = await supabase
@@ -49,24 +50,41 @@ export default function HomePage() {
     fetchMenuItems();
   }, []);
 
-  // 🔁 Auto scroll with pause on touch
+  // 🔁 Auto-scroll
   useEffect(() => {
     if (menuItems.length === 0) return;
     intervalRef.current = setInterval(() => {
-      setCurrentIndex((prev) => (prev + 1) % menuItems.length);
+      setCurrentIndex((prev) => prev + 1);
     }, 1800);
     return () => clearInterval(intervalRef.current);
   }, [menuItems.length]);
 
+  // 🧭 Seamless loop logic
+  const handleTransitionEnd = () => {
+    if (menuItems.length === 0) return;
+    const total = menuItems.length;
+    if (currentIndex === total + 1) {
+      setTransitionEnabled(false);
+      setCurrentIndex(1);
+    }
+  };
+
+  useEffect(() => {
+    if (!transitionEnabled) {
+      const id = setTimeout(() => setTransitionEnabled(true), 50);
+      return () => clearTimeout(id);
+    }
+  }, [transitionEnabled]);
+
+  // 👆 Swipe handlers
   const pauseAutoScroll = () => clearInterval(intervalRef.current);
   const resumeAutoScroll = () => {
     clearInterval(intervalRef.current);
     intervalRef.current = setInterval(() => {
-      setCurrentIndex((prev) => (prev + 1) % menuItems.length);
+      setCurrentIndex((prev) => prev + 1);
     }, 1800);
   };
 
-  // 👆 Swipe handlers
   const handleTouchStart = (e) => {
     pauseAutoScroll();
     touchStartX.current = e.touches[0].clientX;
@@ -75,17 +93,12 @@ export default function HomePage() {
   const handleTouchEnd = () => {
     const diff = touchStartX.current - touchEndX.current;
     if (Math.abs(diff) > 50) {
-      if (diff > 0)
-        setCurrentIndex((prev) => (prev + 1) % menuItems.length);
-      else
-        setCurrentIndex(
-          (prev) => (prev - 1 + menuItems.length) % menuItems.length
-        );
+      setCurrentIndex((prev) => (diff > 0 ? prev + 1 : prev - 1));
     }
     resumeAutoScroll();
   };
 
-  // ⏳ Hide swipe hint after 2s
+  // ⏳ Hide swipe hint
   useEffect(() => {
     const timer = setTimeout(() => setShowHint(false), 2000);
     return () => clearTimeout(timer);
@@ -99,14 +112,20 @@ export default function HomePage() {
     );
   }
 
+  // 🧩 Create cloned slides for seamless looping
+  const slides =
+    menuItems.length > 0
+      ? [menuItems[menuItems.length - 1], ...menuItems, menuItems[0]]
+      : [];
+
   return (
     <main className="app-container">
       <section className="welcome">
         <h2>Welcome!</h2>
         <p>
-          We’re happy to provide this lunch ordering site exclusively
-          for Ampacet. Take a look below to see what’s cooking — then sign up or
-          log in to place your order!
+          We&apos;re happy to provide this lunch ordering site exclusively
+          for Ampacet. Take a look below to see what&apos;s cooking — then sign
+          up or log in to place your order!
         </p>
       </section>
 
@@ -119,9 +138,15 @@ export default function HomePage() {
       >
         <div
           className="carousel-track"
-          style={{ transform: `translateX(-${currentIndex * 100}%)` }}
+          style={{
+            transform: `translateX(-${currentIndex * 100}%)`,
+            transition: transitionEnabled
+              ? "transform 0.45s cubic-bezier(0.33, 1, 0.68, 1)"
+              : "none",
+          }}
+          onTransitionEnd={handleTransitionEnd}
         >
-          {menuItems.map((item, i) => (
+          {slides.map((item, i) => (
             <div key={i} className="carousel-slide">
               <div className="img-container">
                 <Image
@@ -149,7 +174,11 @@ export default function HomePage() {
           {menuItems.map((_, i) => (
             <span
               key={i}
-              className={`dot ${i === currentIndex ? "active" : ""}`}
+              className={`dot ${
+                (currentIndex - 1 + menuItems.length) % menuItems.length === i
+                  ? "active"
+                  : ""
+              }`}
             ></span>
           ))}
         </div>
@@ -175,7 +204,7 @@ export default function HomePage() {
       <style jsx>{`
         .app-container {
           min-height: 100dvh;
-          background: #fffdee;
+          background: #fffdee; /* global background color */
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -192,7 +221,7 @@ export default function HomePage() {
         }
 
         .welcome h2 {
-          color: #d32f2f;
+          color: #2e7d32; /* match LunchApp header green */
           font-size: 1.8rem;
           margin-bottom: 0.5rem;
         }
@@ -207,11 +236,11 @@ export default function HomePage() {
           height: 45vh;
           max-height: 350px;
           touch-action: pan-y;
+          background: #fffdee; /* match app background color */
         }
 
         .carousel-track {
           display: flex;
-          transition: transform 0.45s cubic-bezier(0.33, 1, 0.68, 1);
           width: 100%;
           height: 100%;
         }
@@ -227,7 +256,7 @@ export default function HomePage() {
         .img-container {
           width: 100%;
           height: 100%;
-          background: #fff;
+          background: #fffdee;
           border-radius: 16px;
           display: flex;
           align-items: center;
