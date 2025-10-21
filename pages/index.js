@@ -109,7 +109,7 @@ export default function HomePage() {
           We’re happy to provide this lunch ordering site exclusively
           for Ampacet. We hope you’ll take a chance to try it out.<br />
           Swipe through to see what's cooking, then sign up or log in to place
-          your lunch order.
+          your order.
         </p>
       </section>
 
