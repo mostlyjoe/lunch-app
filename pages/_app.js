@@ -114,51 +114,13 @@ function MyApp({ Component, pageProps }) {
   if (gate.status === "checking") {
     return (
       <>
-        <main style={{ minHeight: "100vh", backgroundColor: "#fafafa", color: "#111" }} />
-        <Toaster />
-      </>
-    );
-  }
-
-  const isAdmin = gate.isAdmin;
-  const isConstruction = router.pathname === "/under-construction";
-
-  return (
-    <>
-      {/* ✅ Show Navbar ONLY for admins (keeps non-admins from navigating around) */}
-      {isAdmin && !isConstruction ? <NavBar /> : null}
-
-      {/* ✅ Page content */}
-      <main style={{ minHeight: "100vh", backgroundColor: "#fafafa", color: "#111" }}>
-        <Component {...pageProps} />
-      </main>
-
-      {/* ✅ Toast notifications site-wide */}
-      <Toaster
+        <main className="appMain" />
+        <Toaster
         position="top-center"
         toastOptions={{
-          success: {
-            duration: 2500,
-            style: {
-              background: "#d1fae5",
-              color: "#065f46",
-              borderRadius: "8px",
-              fontWeight: 600,
-            },
-          },
-          error: {
-            duration: 3000,
-            style: {
-              background: "#fee2e2",
-              color: "#991b1b",
-              borderRadius: "8px",
-              fontWeight: 600,
-            },
-          },
-          style: {
-            fontFamily: "Roboto, sans-serif",
-            fontSize: "0.95rem",
-          },
+          className: "toastBase",
+          success: { className: "toastBase toastSuccess" },
+          error: { className: "toastBase toastError" },
         }}
       />
     </>

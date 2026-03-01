@@ -38,10 +38,10 @@ export default function AdminPage() {
     }
 
     return (
-        <div style={{ padding: "2rem" }}>
+        <div className="adminDash">
             <h2>Admin Dashboard</h2>
 
-            <nav style={{ marginBottom: "2rem" }}>
+            <nav className="adminDashNav">
                 <ul>
                     <li>
                         <Link href="/admin/profiles">Manage Profiles</Link>
