@@ -15,56 +15,45 @@ import { getProfile } from "../lib/db/profiles";
  * - ONLY users whose profiles.is_admin === true can access the rest of the site
  *
  * Notes:
- * - This is a client-side guard (Pages Router). It is strong enough for a temporary lock while you refactor.
- * - You still have RLS + auth for real security (this just gates navigation/UI).
+ * - This is a client-side guard (Pages Router). Good for temporary lock while refactoring.
+ * - Your real security is still Supabase Auth + RLS.
  */
-function MyApp({ Component, pageProps }) {
+export default function MyApp({ Component, pageProps }) {
   const router = useRouter();
 
-  // gate: "checking" -> "admin" | "blocked"
+  // gate: "checking" -> isAdmin true/false
   const [gate, setGate] = useState({ status: "checking", isAdmin: false });
 
   const allowlist = useMemo(() => {
-    // Routes that should always be reachable so admins can sign in / recover.
-    // Non-admins can reach them too, but anything else redirects to /under-construction.
-    return new Set([
-      "/under-construction",
-      "/login",
-      "/signup",
-    ]);
+    // Routes always reachable (so people can sign in / recover)
+    return new Set(["/under-construction", "/login", "/signup"]);
   }, []);
 
-  // ✅ Keep session state consistent (redirect to homepage when logged out)
+  // Keep session state consistent (your existing behavior)
   useEffect(() => {
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "SIGNED_OUT") {
-        // ✅ Redirect to homepage instead of login
-        window.location.href = "/";
-      }
-
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       // Re-check gate on auth changes (sign-in / token refresh / etc.)
       if (session?.user?.id) {
-        // fire-and-forget; we also run a check on mount + on route changes below
         (async () => {
           try {
             const prof = await getProfile(session.user.id);
             const isAdmin = !!prof?.is_admin;
-            setGate({ status: isAdmin ? "admin" : "blocked", isAdmin });
+            setGate({ status: "ready", isAdmin });
           } catch {
-            setGate({ status: "blocked", isAdmin: false });
+            setGate({ status: "ready", isAdmin: false });
           }
         })();
       } else {
-        setGate({ status: "blocked", isAdmin: false });
+        setGate({ status: "ready", isAdmin: false });
       }
     });
 
     return () => subscription?.unsubscribe();
   }, []);
 
-  // ✅ Gate check on mount + whenever route changes
+  // Gate check on mount + whenever route changes
   useEffect(() => {
     let cancelled = false;
 
@@ -74,16 +63,16 @@ function MyApp({ Component, pageProps }) {
         const session = data?.session;
 
         if (!session?.user?.id) {
-          if (!cancelled) setGate({ status: "blocked", isAdmin: false });
+          if (!cancelled) setGate({ status: "ready", isAdmin: false });
           return;
         }
 
         const prof = await getProfile(session.user.id);
         const isAdmin = !!prof?.is_admin;
 
-        if (!cancelled) setGate({ status: isAdmin ? "admin" : "blocked", isAdmin });
+        if (!cancelled) setGate({ status: "ready", isAdmin });
       } catch {
-        if (!cancelled) setGate({ status: "blocked", isAdmin: false });
+        if (!cancelled) setGate({ status: "ready", isAdmin: false });
       }
     })();
 
@@ -92,30 +81,50 @@ function MyApp({ Component, pageProps }) {
     };
   }, [router.pathname]);
 
-  // ✅ Redirect non-admins away from anything not allowlisted
+  // Redirect non-admins away from anything not allowlisted
   useEffect(() => {
-    if (gate.status === "checking") return;
+    if (gate.status !== "ready") return;
 
     const path = router.pathname;
 
-    // allow listed pages always reachable
+    // allowlisted pages always reachable
     if (allowlist.has(path)) return;
 
     // non-admin => redirect to construction
-    if (!gate.isAdmin) {
-      // avoid redirect loops
-      if (path !== "/under-construction") {
-        router.replace("/under-construction");
-      }
+    if (!gate.isAdmin && path !== "/under-construction") {
+      router.replace("/under-construction");
     }
   }, [gate.status, gate.isAdmin, router.pathname, allowlist]);
 
-  // ✅ While checking, render nothing (prevents "flash" of real pages)
-  if (gate.status === "checking") {
+  // While checking, render a blank shell (prevents "flash" of real pages)
+  if (gate.status !== "ready") {
     return (
       <>
         <main className="appMain" />
         <Toaster
+          position="top-center"
+          toastOptions={{
+            className: "toastBase",
+            success: { className: "toastBase toastSuccess" },
+            error: { className: "toastBase toastError" },
+          }}
+        />
+      </>
+    );
+  }
+
+  const isAllowlisted = allowlist.has(router.pathname);
+
+  return (
+    <>
+      {/* Only show NavBar to admins, and never on allowlisted pages */}
+      {gate.isAdmin && !isAllowlisted ? <NavBar /> : null}
+
+      <main className="appMain">
+        <Component {...pageProps} />
+      </main>
+
+      <Toaster
         position="top-center"
         toastOptions={{
           className: "toastBase",
@@ -126,5 +135,3 @@ function MyApp({ Component, pageProps }) {
     </>
   );
 }
-
-export default MyApp;
