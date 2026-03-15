@@ -1,438 +1,470 @@
 ﻿// pages/admin/menu.js
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../lib/supabaseClient";
-import {
-    getMenuItems,
-    createMenuItem,
-    updateMenuItem,
-    uploadMenuImage,
-} from "../../lib/db/menuItems";
 import { getProfile } from "../../lib/db/profiles";
+import { getActiveCatalogItems } from "../../lib/db/menuCatalog";
+import {
+  createOfferingFromCatalog,
+  getAdminOfferings,
+  setOfferingActive,
+  updateOffering,
+} from "../../lib/db/menuOfferings";
 
 export default function AdminMenuPage() {
-    const [items, setItems] = useState([]);
-    const [toast, setToast] = useState(null);
-    const [isAdmin, setIsAdmin] = useState(false);
-    const [loading, setLoading] = useState(false);
-    const [editorItem, setEditorItem] = useState(null);
-    const [isNew, setIsNew] = useState(false);
+  const [catalogItems, setCatalogItems] = useState([]);
+  const [offerings, setOfferings] = useState([]);
+  const [toast, setToast] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [editorItem, setEditorItem] = useState(null);
+  const [isNew, setIsNew] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState(null);
 
-    // ✅ Validation helpers
-    function validateField(name, value, item = null) {
-        switch (name) {
-            case "title":
-                return value?.trim().length >= 2 ? "" : "Title is required (min 2 characters).";
-            case "description":
-                return value?.trim().length > 0 ? "" : "Description is required.";
-            case "price":
-                return parseFloat(value) > 0 ? "" : "Price must be greater than 0.";
-            case "serve_date":
-                return value ? "" : "Serve date is required.";
-            case "order_deadline":
-                if (!value) return "Order deadline is required.";
-                if (item?.serve_date && new Date(value) >= new Date(item.serve_date)) {
-                    return "Deadline must be before the serve date.";
-                }
-                return "";
-            case "image_url":
-                return value ? "" : "Image is required.";
-            default:
-                return "";
+  function showToast(message, type = "info") {
+    setToast({ msg: message, type });
+    setTimeout(() => setToast(null), 4000);
+  }
+
+  function cleanText(value) {
+    return typeof value === "string" ? value.trim() : "";
+  }
+
+  function formatForTimeInput(ts) {
+    if (!ts) return "";
+    const date = new Date(ts);
+    const hh = String(date.getHours()).padStart(2, "0");
+    const mm = String(date.getMinutes()).padStart(2, "0");
+    return `${hh}:${mm}`;
+  }
+
+  function formatServeDate(ymd) {
+    if (!ymd) return "Not set";
+    const [y, m, d] = ymd.split("-").map(Number);
+    const dt = new Date(y, (m || 1) - 1, d || 1, 0, 0, 0);
+    return dt.toLocaleDateString("en-CA", {
+      timeZone: "America/Toronto",
+      weekday: "long",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  }
+
+  function formatDeadline(ts) {
+    if (!ts) return "Not set";
+    const dt = new Date(ts);
+    return dt.toLocaleString("en-CA", {
+      timeZone: "America/Toronto",
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  }
+
+  function getCatalogTitle(id) {
+    const match = catalogItems.find((it) => it.id === id);
+    return match?.title || "Unknown item";
+  }
+
+  function validateField(name, value, item) {
+    switch (name) {
+      case "catalog_item_id":
+        return value ? "" : "Please select a reusable catalog item.";
+      case "serve_date":
+        return value ? "" : "Serve date is required.";
+      case "deadline_time":
+        if (!value) return "Order deadline time is required.";
+
+        if (item?.serve_date) {
+          const serveDate = new Date(`${item.serve_date}T23:59:59`);
+          const deadlineDate = new Date(`${item.serve_date}T${value}:00`);
+          if (deadlineDate > serveDate) {
+            return "Deadline time must be on or before the serve date.";
+          }
         }
+        return "";
+      case "override_price":
+        if (value === "" || value === null || value === undefined) return "";
+        return parseFloat(value) >= 0 ? "" : "Override price must be 0 or higher.";
+      default:
+        return "";
     }
+  }
 
-    function validateItem(item) {
-        return {
-            title: validateField("title", item.title, item),
-            description: validateField("description", item.description, item),
-            price: validateField("price", item.price, item),
-            serve_date: validateField("serve_date", item.serve_date, item),
-            order_deadline: validateField("order_deadline", item.order_deadline, item),
-            image_url: validateField("image_url", item.image_url, item),
-        };
+  function validateItem(item) {
+    return {
+      catalog_item_id: validateField("catalog_item_id", item.catalog_item_id, item),
+      serve_date: validateField("serve_date", item.serve_date, item),
+      deadline_time: validateField("deadline_time", item.deadline_time, item),
+      override_price: validateField("override_price", item.override_price, item),
+    };
+  }
+
+  const errors = editorItem ? validateItem(editorItem) : {};
+  const isValidForm =
+    editorItem && Object.values(errors).every((err) => err === "");
+
+  const refreshPageData = useCallback(async () => {
+    try {
+      const [catalogRes, offeringsRes] = await Promise.all([
+        getActiveCatalogItems(),
+        getAdminOfferings(),
+      ]);
+
+      if (!catalogRes.ok) throw new Error(catalogRes.error);
+      if (!offeringsRes.ok) throw new Error(offeringsRes.error);
+
+      setCatalogItems(catalogRes.data || []);
+      setOfferings(offeringsRes.data || []);
+    } catch (err) {
+      showToast("❌ Failed to load page data: " + err.message, "error");
     }
+  }, []);
 
-    const errors = editorItem ? validateItem(editorItem) : {};
-    const isValidForm = editorItem && Object.values(errors).every((err) => err === "");
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
 
-    function showToast(message, type = "info") {
-        setToast({ msg: message, type });
-        setTimeout(() => setToast(null), 4000);
-    }
-
-    // ✅ Memoized refreshMenu (fixes ESLint dependency warning)
-    const refreshMenu = useCallback(async () => {
-        try {
-            const menu = await getMenuItems();
-            const sortedMenu = (menu || []).sort(
-                (a, b) => new Date(b.serve_date) - new Date(a.serve_date)
-            );
-            setItems(sortedMenu);
-        } catch (err) {
-            showToast("❌ Failed to refresh menu: " + err.message, "error");
-        }
-    }, []);
-
-    useEffect(() => {
-        async function loadData() {
-            try {
-                const { data } = await supabase.auth.getUser();
-                if (!data?.user) {
-                    window.location.href = "/login";
-                    return;
-                }
-                const profile = await getProfile(data.user.id);
-                if (!profile?.is_admin) {
-                    showToast("❌ Access denied: admins only.", "error");
-                    return;
-                }
-                setIsAdmin(true);
-                await refreshMenu();
-            } catch (err) {
-                showToast("❌ Failed to load menu: " + err.message, "error");
-            }
-        }
-        loadData();
-    }, [refreshMenu]);
-
-    async function handleSave() {
-        if (!editorItem || !isValidForm) {
-            showToast("❌ Please fix validation errors before saving.", "error");
-            return;
+        if (!user) {
+          window.location.href = "/login";
+          return;
         }
 
-        setLoading(true);
-        try {
-            const formattedItem = {
-                ...editorItem,
-                price: parseFloat(editorItem.price).toFixed(2),
-            };
-
-            // 🕒 Convert datetime-local string -> ISO before saving
-            if (formattedItem.order_deadline) {
-                formattedItem.order_deadline = new Date(formattedItem.order_deadline).toISOString();
-            }
-
-            if (isNew) {
-                await createMenuItem(formattedItem);
-                showToast("✅ Menu item created!", "success");
-            } else {
-                await updateMenuItem(editorItem.id, formattedItem);
-                showToast("✅ Menu item updated!", "success");
-            }
-
-            await refreshMenu();
-            resetEditor();
-        } catch (err) {
-            showToast("❌ " + err.message, "error");
-        } finally {
-            setLoading(false);
+        const profile = await getProfile(user.id);
+        if (!profile?.is_admin) {
+          showToast("❌ Access denied: admins only.", "error");
+          return;
         }
+
+        setCurrentUserId(user.id);
+        setIsAdmin(true);
+        await refreshPageData();
+      } catch (err) {
+        showToast("❌ Failed to load page: " + err.message, "error");
+      }
     }
 
-    // ✅ Helper: Convert ISO -> local-friendly datetime-local format
-    function formatForDateTimeLocal(timestamp) {
-        if (!timestamp) return "";
-        const date = new Date(timestamp);
-        const offset = date.getTimezoneOffset();
-        const local = new Date(date.getTime() - offset * 60000);
-        return local.toISOString().slice(0, 16);
+    loadData();
+  }, [refreshPageData]);
+
+  function resetEditor() {
+    setEditorItem(null);
+    setIsNew(false);
+  }
+
+  async function handleSave() {
+    if (!editorItem || !isValidForm) {
+      showToast("❌ Please fix validation errors before saving.", "error");
+      return;
     }
 
-    // ✅ Display helpers
-    function formatServeDate(ymd) {
-        if (!ymd) return "Not set";
-        const [y, m, d] = ymd.split("-").map(Number);
-        const dt = new Date(y, (m || 1) - 1, d || 1, 0, 0, 0);
-        return dt.toLocaleDateString("en-CA", {
-            timeZone: "America/Toronto",
-            weekday: "long",
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-        });
+    setLoading(true);
+    try {
+      const payload = {
+        catalog_item_id: editorItem.catalog_item_id,
+        serve_date: editorItem.serve_date,
+        deadline_time: editorItem.deadline_time,
+        override_price: editorItem.override_price,
+        is_active: editorItem.is_active ?? true,
+      };
+
+      let res;
+      if (isNew) {
+        res = await createOfferingFromCatalog(payload, currentUserId);
+      } else {
+        res = await updateOffering(editorItem.id, payload, currentUserId);
+      }
+
+      if (!res.ok) throw new Error(res.error);
+
+      showToast(
+        isNew ? "✅ Menu offering created!" : "✅ Menu offering updated!",
+        "success"
+      );
+
+      await refreshPageData();
+      resetEditor();
+    } catch (err) {
+      showToast("❌ " + err.message, "error");
+    } finally {
+      setLoading(false);
     }
+  }
 
-    function formatDeadline(ts) {
-        if (!ts) return "Not set";
-        const dt = new Date(ts);
-        return dt.toLocaleString("en-CA", {
-            timeZone: "America/Toronto",
-            dateStyle: "medium",
-            timeStyle: "short",
-        });
+  async function handleToggleStatus(item) {
+    try {
+      const res = await setOfferingActive(item.id, !item.is_active, currentUserId);
+      if (!res.ok) throw new Error(res.error);
+
+      showToast(
+        item.is_active ? "✅ Offering archived." : "✅ Offering reactivated.",
+        "success"
+      );
+
+      await refreshPageData();
+
+      if (editorItem?.id === item.id) {
+        setEditorItem({ ...editorItem, is_active: !item.is_active });
+      }
+    } catch (err) {
+      showToast("❌ " + err.message, "error");
     }
+  }
 
-    function resetEditor() {
-        setEditorItem(null);
-        setIsNew(false);
-    }
+  if (!isAdmin) return <p>❌ Access denied.</p>;
 
-    if (!isAdmin) return <p>❌ Access denied.</p>;
+  return (
+    <main className="admin-menu-page">
+      <div className="card-container">
+        <div className="editor-card">
+          {!editorItem ? (
+            <p className="placeholder">
+              Select an offering to edit, or click Add New to schedule a reusable item.
+            </p>
+          ) : (
+            <>
+              <h3>{isNew ? "Schedule Menu Offering" : "Edit Menu Offering"}</h3>
 
-    return (
-        <main className="admin-menu-page">
-            <div className="card-container">
-                {/* ✅ Editor Card */}
-                <div className="editor-card">
-                    {!editorItem ? (
-                        <p className="placeholder">Select an item to edit or click Add New.</p>
-                    ) : (
-                        <>
-                            <h3>{isNew ? "Add New Menu Item" : "Edit Menu Item"}</h3>
+              <div className="form-group">
+                <label>Reusable Item</label>
+                <select
+                  value={editorItem.catalog_item_id}
+                  onChange={(e) =>
+                    setEditorItem({
+                      ...editorItem,
+                      catalog_item_id: e.target.value,
+                    })
+                  }
+                  className={errors.catalog_item_id ? "invalid" : ""}
+                >
+                  <option value="">Select reusable item</option>
+                  {catalogItems.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.title} (${parseFloat(item.default_price).toFixed(2)})
+                    </option>
+                  ))}
+                </select>
+                {errors.catalog_item_id && (
+                  <p className="error-text">{errors.catalog_item_id}</p>
+                )}
+              </div>
 
-                            {/* Title */}
-                            <div className="form-group">
-                                <label>Title</label>
-                                <input
-                                    value={editorItem.title}
-                                    onChange={(e) =>
-                                        setEditorItem({ ...editorItem, title: e.target.value })
-                                    }
-                                    className={errors.title ? "invalid" : ""}
-                                />
-                                {errors.title && <p className="error-text">{errors.title}</p>}
-                            </div>
+              <div className="form-group">
+                <label>Serve Date</label>
+                <input
+                  type="date"
+                  value={editorItem.serve_date}
+                  onChange={(e) =>
+                    setEditorItem({
+                      ...editorItem,
+                      serve_date: e.target.value,
+                    })
+                  }
+                  className={errors.serve_date ? "invalid" : ""}
+                />
+                {errors.serve_date && (
+                  <p className="error-text">{errors.serve_date}</p>
+                )}
+              </div>
 
-                            {/* Description */}
-                            <div className="form-group">
-                                <label>Description</label>
-                                <textarea
-                                    value={editorItem.description}
-                                    onChange={(e) =>
-                                        setEditorItem({ ...editorItem, description: e.target.value })
-                                    }
-                                    rows={3}
-                                    className={errors.description ? "invalid" : ""}
-                                />
-                                {errors.description && (
-                                    <p className="error-text">{errors.description}</p>
-                                )}
-                            </div>
+              <div className="form-group">
+                <label>Order Deadline Time</label>
+                <input
+                  type="time"
+                  value={editorItem.deadline_time}
+                  onChange={(e) =>
+                    setEditorItem({
+                      ...editorItem,
+                      deadline_time: e.target.value,
+                    })
+                  }
+                  className={errors.deadline_time ? "invalid" : ""}
+                />
+                {errors.deadline_time && (
+                  <p className="error-text">{errors.deadline_time}</p>
+                )}
+              </div>
 
-                            {/* Price */}
-                            <div className="form-group">
-                                <label>Price ($)</label>
-                                <input
-                                    type="number"
-                                    step="0.01"
-                                    value={editorItem.price}
-                                    onChange={(e) =>
-                                        setEditorItem({ ...editorItem, price: e.target.value })
-                                    }
-                                    className={errors.price ? "invalid" : ""}
-                                />
-                                {errors.price && <p className="error-text">{errors.price}</p>}
-                            </div>
+              <div className="form-group">
+                <label>Override Price ($)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="Leave blank to use catalog default"
+                  value={editorItem.override_price}
+                  onChange={(e) =>
+                    setEditorItem({
+                      ...editorItem,
+                      override_price: e.target.value,
+                    })
+                  }
+                  className={errors.override_price ? "invalid" : ""}
+                />
+                {errors.override_price && (
+                  <p className="error-text">{errors.override_price}</p>
+                )}
+              </div>
 
-                            {/* Serve Date */}
-                            <div className="form-group">
-                                <label>Serve Date</label>
-                                <input
-                                    type="date"
-                                    value={editorItem.serve_date}
-                                    onChange={(e) =>
-                                        setEditorItem({ ...editorItem, serve_date: e.target.value })
-                                    }
-                                    className={errors.serve_date ? "invalid" : ""}
-                                />
-                                {errors.serve_date && (
-                                    <p className="error-text">{errors.serve_date}</p>
-                                )}
-                            </div>
+              <div className="form-group">
+                <label>Status</label>
+                <label className="status-toggle">
+                  <input
+                    type="checkbox"
+                    checked={editorItem.is_active ?? true}
+                    onChange={(e) =>
+                      setEditorItem({
+                        ...editorItem,
+                        is_active: e.target.checked,
+                      })
+                    }
+                  />
+                  <span>{editorItem.is_active ? "Active" : "Archived"}</span>
+                </label>
+              </div>
 
-                            {/* ✅ Order Deadline (Date + Time Picker - Local Time Fixed) */}
-                            <div className="form-group">
-                                <label>Order Deadline (Date + Time)</label>
-                                <input
-                                    type="datetime-local"
-                                    value={
-                                        editorItem.order_deadline
-                                            ? formatForDateTimeLocal(editorItem.order_deadline)
-                                            : ""
-                                    }
-                                    onChange={(e) =>
-                                        setEditorItem({
-                                            ...editorItem,
-                                            order_deadline: e.target.value,
-                                        })
-                                    }
-                                    className={errors.order_deadline ? "invalid" : ""}
-                                />
-                                {errors.order_deadline && (
-                                    <p className="error-text">{errors.order_deadline}</p>
-                                )}
-                            </div>
-
-                            {/* ✅ Active / Archived Toggle */}
-                            <div className="form-group">
-                                <label>Status</label>
-                                <label className="status-toggle">
-                                    <input
-                                        type="checkbox"
-                                        checked={editorItem.is_active ?? true}
-                                        onChange={(e) =>
-                                            setEditorItem({
-                                                ...editorItem,
-                                                is_active: e.target.checked,
-                                            })
-                                        }
-                                    />
-                                    <span>{editorItem.is_active ? "Active" : "Archived"}</span>
-                                </label>
-                            </div>
-
-                            {/* Image upload */}
-                            <div className="form-group image-upload">
-                                <label>Image</label>
-                                <input
-                                    type="file"
-                                    accept="image/*"
-                                    onChange={async (e) => {
-                                        const file = e.target.files[0];
-                                        if (!file) return;
-                                        try {
-                                            const publicUrl = await uploadMenuImage(file);
-                                            setEditorItem({ ...editorItem, image_url: publicUrl });
-                                            showToast("✅ Image uploaded!", "success");
-                                        } catch (err) {
-                                            showToast("❌ " + err.message, "error");
-                                        }
-                                    }}
-                                />
-                                {errors.image_url && !editorItem.image_url && (
-                                    <p className="error-text">{errors.image_url}</p>
-                                )}
-                                {editorItem.image_url && (
-                                    <div className="image-preview">
-                                        <img src={editorItem.image_url} alt="Preview" />
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Buttons */}
-                            <div className="button-row">
-                                <button
-                                    className={`btn save ${!isValidForm || loading ? "disabled" : ""}`}
-                                    onClick={handleSave}
-                                    disabled={!isValidForm || loading}
-                                >
-                                    {loading ? "⏳ Saving..." : "💾 Save"}
-                                </button>
-                                <button className="btn" onClick={resetEditor}>
-                                    Cancel
-                                </button>
-                            </div>
-                        </>
-                    )}
-                </div>
-
-                {/* ✅ Items Table */}
-                <div className="table-card">
-                    <div className="header-row">
-                        <h2>Menu Items</h2>
-                        <button
-                            className={`btn add ${editorItem && !isNew ? "disabled" : ""}`}
-                            disabled={editorItem && !isNew}
-                            title={
-                                editorItem && !isNew
-                                    ? "Finish editing before adding a new item"
-                                    : "Add a new menu item"
-                            }
-                            onClick={() => {
-                                if (editorItem && !isNew) return;
-                                setEditorItem({
-                                    title: "",
-                                    description: "",
-                                    price: "",
-                                    image_url: "",
-                                    serve_date: "",
-                                    order_deadline: "",
-                                    is_active: true,
-                                });
-                                setIsNew(true);
-                            }}
-                        >
-                            ➕ Add New
-                        </button>
+              {!isNew && (
+                <div className="form-group">
+                  <label>Snapshot Preview</label>
+                  <div className="image-preview" style={{ padding: "0.75rem" }}>
+                    <div>
+                      <strong>{editorItem.title}</strong>
+                      <p style={{ marginTop: 8 }}>{editorItem.description || "No description"}</p>
+                      <p style={{ marginTop: 8 }}>
+                        Current offering price: $
+                        {parseFloat(editorItem.unit_price || 0).toFixed(2)}
+                      </p>
                     </div>
-
-                    {items.length === 0 ? (
-                        <div className="empty-state">
-                            <p>No menu items yet.</p>
-                        </div>
-                    ) : (
-                        <table className="menu-table">
-                            <thead>
-                                <tr>
-                                    <th>Image</th>
-                                    <th>Title</th>
-                                    <th>Description</th>
-                                    <th>Price</th>
-                                    <th>Serve Date</th>
-                                    <th>Order Deadline</th>
-                                    <th>Status</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {items.map((item, index) => {
-                                    const isActive = editorItem && !isNew && editorItem.id === item.id;
-                                    return (
-                                        <tr
-                                            key={item.id}
-                                            className={`${index % 2 === 0 ? "row-grey" : "row-beige"} ${isActive ? "active-row" : ""
-                                                }`}
-                                        >
-                                            <td>
-                                                {item.image_url ? (
-                                                    <img
-                                                        src={item.image_url}
-                                                        alt={item.title}
-                                                        className="adminMenuThumb"
-                                                    />
-                                                ) : (
-                                                    <span>No image</span>
-                                                )}
-                                            </td>
-                                            <td>{item.title}</td>
-                                            <td className="desc-cell">{item.description}</td>
-                                            <td>${parseFloat(item.price).toFixed(2)}</td>
-                                            <td>{formatServeDate(item.serve_date)}</td>
-                                            <td>{formatDeadline(item.order_deadline)}</td>
-                                            <td>
-                                                <span
-                                                    className={
-                                                        item.is_active ? "status-active" : "status-archived"
-                                                    }
-                                                >
-                                                    {item.is_active ? "Active" : "Archived"}
-                                                </span>
-                                            </td>
-                                            <td>
-                                                {!isActive && (
-                                                    <button
-                                                        className="btn edit"
-                                                        onClick={() => {
-                                                            setEditorItem(item);
-                                                            setIsNew(false);
-                                                        }}
-                                                    >
-                                                        ✏️ Edit
-                                                    </button>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    )}
+                  </div>
                 </div>
+              )}
+
+              <div className="button-row">
+                <button
+                  className={`btn save ${!isValidForm || loading ? "disabled" : ""}`}
+                  onClick={handleSave}
+                  disabled={!isValidForm || loading}
+                >
+                  {loading ? "⏳ Saving..." : "💾 Save"}
+                </button>
+                <button className="btn" onClick={resetEditor}>
+                  Cancel
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="table-card">
+          <div className="header-row">
+            <div>
+              <h2>Menu Offerings</h2>
+              <p className="placeholder" style={{ marginTop: 6 }}>
+                These are the actual dated offerings users will order from.
+              </p>
             </div>
 
-            {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
+            <button
+              className={`btn add ${editorItem && !isNew ? "disabled" : ""}`}
+              disabled={editorItem && !isNew}
+              title={
+                editorItem && !isNew
+                  ? "Finish editing before adding a new offering"
+                  : "Schedule a new offering"
+              }
+              onClick={() => {
+                if (editorItem && !isNew) return;
 
-            {/* ✅ CSS */}</main>
-    );
+                setEditorItem({
+                  catalog_item_id: "",
+                  serve_date: "",
+                  deadline_time: "",
+                  override_price: "",
+                  is_active: true,
+                });
+                setIsNew(true);
+              }}
+            >
+              ➕ Add New
+            </button>
+          </div>
+
+          {offerings.length === 0 ? (
+            <div className="empty-state">
+              <p>No offerings yet.</p>
+            </div>
+          ) : (
+            <table className="menu-table">
+              <thead>
+                <tr>
+                  <th>Snapshot Title</th>
+                  <th>Reusable Source</th>
+                  <th>Price</th>
+                  <th>Serve Date</th>
+                  <th>Deadline</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {offerings.map((item, index) => {
+                  const isEditing = editorItem && !isNew && editorItem.id === item.id;
+
+                  return (
+                    <tr
+                      key={item.id}
+                      className={`${index % 2 === 0 ? "row-grey" : "row-beige"} ${
+                        isEditing ? "active-row" : ""
+                      }`}
+                    >
+                      <td>{item.title}</td>
+                      <td>{getCatalogTitle(item.catalog_item_id)}</td>
+                      <td>${parseFloat(item.unit_price).toFixed(2)}</td>
+                      <td>{formatServeDate(item.serve_date)}</td>
+                      <td>{formatDeadline(item.order_deadline)}</td>
+                      <td>
+                        <span
+                          className={item.is_active ? "status-active" : "status-archived"}
+                        >
+                          {item.is_active ? "Active" : "Archived"}
+                        </span>
+                      </td>
+                      <td>
+                        {!isEditing && (
+                          <>
+                            <button
+                              className="btn edit"
+                              onClick={() => {
+                                setEditorItem({
+                                  ...item,
+                                  deadline_time: formatForTimeInput(item.order_deadline),
+                                  override_price: "",
+                                });
+                                setIsNew(false);
+                              }}
+                            >
+                              ✏️ Edit
+                            </button>{" "}
+                            <button
+                              className="btn"
+                              onClick={() => handleToggleStatus(item)}
+                            >
+                              {item.is_active ? "Archive" : "Reactivate"}
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {toast && <div className={`toast ${toast.type}`}>{toast.msg}</div>}
+    </main>
+  );
 }

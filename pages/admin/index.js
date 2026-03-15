@@ -1,91 +1,86 @@
-﻿import Link from "next/link";
-import { useState, useEffect } from "react";
-import { getMenuItems, createMenuItem } from "../../lib/db/menuItems";
+﻿// pages/admin/index.js
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { supabase } from "../../lib/supabaseClient";
+import { getProfile } from "../../lib/db/profiles";
 
 export default function AdminPage() {
-    const [items, setItems] = useState([]);
-    const [title, setTitle] = useState("");
-    const [desc, setDesc] = useState("");
-    const [price, setPrice] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [checking, setChecking] = useState(true);
 
-    useEffect(() => {
-        async function loadItems() {
-            const data = await getMenuItems();
-            setItems(data);
-        }
-        loadItems();
-    }, []);
+  useEffect(() => {
+    async function load() {
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
 
-    async function handleAddItem(e) {
-        e.preventDefault();
-        try {
-            await createMenuItem({
-                title,
-                description: desc,
-                price: parseFloat(price),
-                image_url: "https://placehold.co/200x150",
-                serve_date: "2025-10-05",
-                order_deadline: "2025-10-04T18:00:00Z",
-            });
-            setTitle("");
-            setDesc("");
-            setPrice("");
-            const data = await getMenuItems();
-            setItems(data);
-        } catch (err) {
-            console.error(err);
+        if (!user) {
+          window.location.href = "/login";
+          return;
         }
+
+        const profile = await getProfile(user.id);
+        if (!profile?.is_admin) {
+          setChecking(false);
+          return;
+        }
+
+        setIsAdmin(true);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setChecking(false);
+      }
     }
 
-    return (
-        <div className="adminDash">
+    load();
+  }, []);
+
+  if (checking) return <p style={{ padding: "2rem" }}>Loading admin dashboard...</p>;
+  if (!isAdmin) return <p style={{ padding: "2rem" }}>❌ Access denied.</p>;
+
+  return (
+    <main className="admin-menu-page" style={{ paddingTop: "2rem" }}>
+      <div className="table-card" style={{ maxWidth: 1000, margin: "0 auto" }}>
+        <div className="header-row">
+          <div>
             <h2>Admin Dashboard</h2>
-
-            <nav className="adminDashNav">
-                <ul>
-                    <li>
-                        <Link href="/admin/profiles">Manage Profiles</Link>
-                    </li>
-                    <li>
-                        <Link href="/admin/orders">View Orders</Link>
-                    </li>
-                </ul>
-            </nav>
-
-            <form onSubmit={handleAddItem}>
-                <h3>Add New Menu Item</h3>
-                <input
-                    type="text"
-                    placeholder="Title"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                />
-                <br />
-                <input
-                    type="text"
-                    placeholder="Description"
-                    value={desc}
-                    onChange={(e) => setDesc(e.target.value)}
-                />
-                <br />
-                <input
-                    type="number"
-                    placeholder="Price"
-                    value={price}
-                    onChange={(e) => setPrice(e.target.value)}
-                />
-                <br />
-                <button type="submit">Add Menu Item</button>
-            </form>
-
-            <h3>Current Menu Items</h3>
-            <ul>
-                {items.map((item) => (
-                    <li key={item.id}>
-                        <strong>{item.title}</strong> — ${item.price}
-                    </li>
-                ))}
-            </ul>
+            <p className="placeholder" style={{ marginTop: 6 }}>
+              Reusable items now live in Catalog. Actual dated menu entries live in Menu Offerings.
+            </p>
+          </div>
         </div>
-    );
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: "1rem",
+            marginTop: "1rem",
+          }}
+        >
+          <Link href="/admin/catalog" className="btn" style={{ textAlign: "center" }}>
+            Reusable Catalog
+          </Link>
+
+          <Link href="/admin/menu" className="btn" style={{ textAlign: "center" }}>
+            Menu Offerings
+          </Link>
+
+          <Link href="/admin/orders" className="btn" style={{ textAlign: "center" }}>
+            View Orders
+          </Link>
+
+          <Link href="/admin/orders-by-shift" className="btn" style={{ textAlign: "center" }}>
+            Orders by Shift
+          </Link>
+
+          <Link href="/admin/profiles" className="btn" style={{ textAlign: "center" }}>
+            User Profiles
+          </Link>
+        </div>
+      </div>
+    </main>
+  );
 }
