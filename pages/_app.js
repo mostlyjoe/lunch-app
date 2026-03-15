@@ -94,7 +94,7 @@ export default function MyApp({ Component, pageProps }) {
     if (!gate.isAdmin && path !== "/under-construction") {
       router.replace("/under-construction");
     }
-  }, [gate.status, gate.isAdmin, router.pathname, allowlist]);
+  }, [gate.status, gate.isAdmin, router, allowlist]);
 
   // While checking, render a blank shell (prevents "flash" of real pages)
   if (gate.status !== "ready") {
