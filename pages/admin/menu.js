@@ -9,6 +9,12 @@ import {
   setOfferingActive,
   updateOffering,
 } from "../../lib/db/menuOfferings";
+import {
+  formatServeDate,
+  formatTorontoDateInput,
+  formatTorontoDateTime,
+  formatTorontoTimeInput,
+} from "../../lib/dateTime";
 
 export default function AdminMenuPage() {
   const [catalogItems, setCatalogItems] = useState([]);
@@ -25,41 +31,6 @@ export default function AdminMenuPage() {
     setTimeout(() => setToast(null), 4000);
   }
 
-  function cleanText(value) {
-    return typeof value === "string" ? value.trim() : "";
-  }
-
-  function formatForTimeInput(ts) {
-    if (!ts) return "";
-    const date = new Date(ts);
-    const hh = String(date.getHours()).padStart(2, "0");
-    const mm = String(date.getMinutes()).padStart(2, "0");
-    return `${hh}:${mm}`;
-  }
-
-  function formatServeDate(ymd) {
-    if (!ymd) return "Not set";
-    const [y, m, d] = ymd.split("-").map(Number);
-    const dt = new Date(y, (m || 1) - 1, d || 1, 0, 0, 0);
-    return dt.toLocaleDateString("en-CA", {
-      timeZone: "America/Toronto",
-      weekday: "long",
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  }
-
-  function formatDeadline(ts) {
-    if (!ts) return "Not set";
-    const dt = new Date(ts);
-    return dt.toLocaleString("en-CA", {
-      timeZone: "America/Toronto",
-      dateStyle: "medium",
-      timeStyle: "short",
-    });
-  }
-
   function getCatalogTitle(id) {
     const match = catalogItems.find((it) => it.id === id);
     return match?.title || "Unknown item";
@@ -69,22 +40,34 @@ export default function AdminMenuPage() {
     switch (name) {
       case "catalog_item_id":
         return value ? "" : "Please select a reusable catalog item.";
+
       case "serve_date":
         return value ? "" : "Serve date is required.";
-      case "deadline_time":
-        if (!value) return "Order deadline time is required.";
+
+      case "deadline_date":
+        if (!value) return "Deadline date is required.";
 
         if (item?.serve_date) {
           const serveDate = new Date(`${item.serve_date}T23:59:59`);
-          const deadlineDate = new Date(`${item.serve_date}T${value}:00`);
+          const deadlineDate = new Date(`${value}T23:59:59`);
+
+          if (Number.isNaN(serveDate.getTime()) || Number.isNaN(deadlineDate.getTime())) {
+            return "Deadline date is invalid.";
+          }
+
           if (deadlineDate > serveDate) {
-            return "Deadline time must be on or before the serve date.";
+            return "Deadline date must be on or before the serve date.";
           }
         }
         return "";
+
+      case "deadline_time":
+        return value ? "" : "Deadline time is required.";
+
       case "override_price":
         if (value === "" || value === null || value === undefined) return "";
         return parseFloat(value) >= 0 ? "" : "Override price must be 0 or higher.";
+
       default:
         return "";
     }
@@ -94,14 +77,14 @@ export default function AdminMenuPage() {
     return {
       catalog_item_id: validateField("catalog_item_id", item.catalog_item_id, item),
       serve_date: validateField("serve_date", item.serve_date, item),
+      deadline_date: validateField("deadline_date", item.deadline_date, item),
       deadline_time: validateField("deadline_time", item.deadline_time, item),
       override_price: validateField("override_price", item.override_price, item),
     };
   }
 
   const errors = editorItem ? validateItem(editorItem) : {};
-  const isValidForm =
-    editorItem && Object.values(errors).every((err) => err === "");
+  const isValidForm = editorItem && Object.values(errors).every((err) => err === "");
 
   const refreshPageData = useCallback(async () => {
     try {
@@ -165,6 +148,7 @@ export default function AdminMenuPage() {
       const payload = {
         catalog_item_id: editorItem.catalog_item_id,
         serve_date: editorItem.serve_date,
+        deadline_date: editorItem.deadline_date,
         deadline_time: editorItem.deadline_time,
         override_price: editorItem.override_price,
         is_active: editorItem.is_active ?? true,
@@ -270,7 +254,25 @@ export default function AdminMenuPage() {
               </div>
 
               <div className="form-group">
-                <label>Order Deadline Time</label>
+                <label>Deadline Date</label>
+                <input
+                  type="date"
+                  value={editorItem.deadline_date}
+                  onChange={(e) =>
+                    setEditorItem({
+                      ...editorItem,
+                      deadline_date: e.target.value,
+                    })
+                  }
+                  className={errors.deadline_date ? "invalid" : ""}
+                />
+                {errors.deadline_date && (
+                  <p className="error-text">{errors.deadline_date}</p>
+                )}
+              </div>
+
+              <div className="form-group">
+                <label>Deadline Time</label>
                 <input
                   type="time"
                   value={editorItem.deadline_time}
@@ -330,10 +332,15 @@ export default function AdminMenuPage() {
                   <div className="image-preview" style={{ padding: "0.75rem" }}>
                     <div>
                       <strong>{editorItem.title}</strong>
-                      <p style={{ marginTop: 8 }}>{editorItem.description || "No description"}</p>
+                      <p style={{ marginTop: 8 }}>
+                        {editorItem.description || "No description"}
+                      </p>
                       <p style={{ marginTop: 8 }}>
                         Current offering price: $
                         {parseFloat(editorItem.unit_price || 0).toFixed(2)}
+                      </p>
+                      <p style={{ marginTop: 8 }}>
+                        Current deadline: {formatTorontoDateTime(editorItem.order_deadline)}
                       </p>
                     </div>
                   </div>
@@ -348,7 +355,7 @@ export default function AdminMenuPage() {
                 >
                   {loading ? "⏳ Saving..." : "💾 Save"}
                 </button>
-                <button className="btn" onClick={resetEditor}>
+                <button className="btn" onClick={resetEditor} type="button">
                   Cancel
                 </button>
               </div>
@@ -379,12 +386,14 @@ export default function AdminMenuPage() {
                 setEditorItem({
                   catalog_item_id: "",
                   serve_date: "",
+                  deadline_date: "",
                   deadline_time: "",
                   override_price: "",
                   is_active: true,
                 });
                 setIsNew(true);
               }}
+              type="button"
             >
               ➕ Add New
             </button>
@@ -422,7 +431,7 @@ export default function AdminMenuPage() {
                       <td>{getCatalogTitle(item.catalog_item_id)}</td>
                       <td>${parseFloat(item.unit_price).toFixed(2)}</td>
                       <td>{formatServeDate(item.serve_date)}</td>
-                      <td>{formatDeadline(item.order_deadline)}</td>
+                      <td>{formatTorontoDateTime(item.order_deadline)}</td>
                       <td>
                         <span
                           className={item.is_active ? "status-active" : "status-archived"}
@@ -438,17 +447,20 @@ export default function AdminMenuPage() {
                               onClick={() => {
                                 setEditorItem({
                                   ...item,
-                                  deadline_time: formatForTimeInput(item.order_deadline),
+                                  deadline_date: formatTorontoDateInput(item.order_deadline),
+                                  deadline_time: formatTorontoTimeInput(item.order_deadline),
                                   override_price: "",
                                 });
                                 setIsNew(false);
                               }}
+                              type="button"
                             >
                               ✏️ Edit
                             </button>{" "}
                             <button
                               className="btn"
                               onClick={() => handleToggleStatus(item)}
+                              type="button"
                             >
                               {item.is_active ? "Archive" : "Reactivate"}
                             </button>
