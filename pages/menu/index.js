@@ -1,281 +1,210 @@
 ﻿// pages/menu/index.js
-import { useEffect, useMemo, useState, useCallback } from "react";
-import { useRouter } from "next/router";
-import { supabase } from "../../lib/supabaseClient";
-import { getMenuItems } from "../../lib/db/menuItems";
+import Image from "next/image";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 
+import { supabase } from "../../lib/supabaseClient";
+import { getActiveOfferingsForMenu } from "../../lib/db/menuOfferings";
+import {
+  formatServeDate,
+  formatTorontoDateTime,
+  getDeadlineStatus,
+  isPastDeadline,
+} from "../../lib/dateTime";
+
+function money(value) {
+  const num = Number(value || 0);
+  return num.toFixed(2);
+}
+
+function groupOfferingsByServeDate(items) {
+  const groups = new Map();
+
+  for (const item of items) {
+    const key = item.serve_date || "unknown";
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+
+  return Array.from(groups.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([serveDate, offerings]) => ({
+      serveDate,
+      label: formatServeDate(serveDate),
+      offerings: offerings.sort((a, b) => {
+        const aTime = new Date(a.order_deadline).getTime();
+        const bTime = new Date(b.order_deadline).getTime();
+        return aTime - bTime;
+      }),
+    }));
+}
+
+function deadlinePillClass(deadlineValue) {
+  const status = getDeadlineStatus(deadlineValue);
+
+  if (status === "green") return "deadline-pill deadline-green";
+  if (status === "yellow") return "deadline-pill deadline-yellow";
+  if (status === "orange") return "deadline-pill deadline-orange";
+  return "deadline-pill deadline-closed";
+}
+
 export default function MenuPage() {
-    const router = useRouter();
-    const [hasMounted, setHasMounted] = useState(false);
-    const [user, setUser] = useState(null);
-    const [menu, setMenu] = useState([]);
-    const [now, setNow] = useState(Date.now());
+  const [booting, setBooting] = useState(true);
+  const [offerings, setOfferings] = useState([]);
+  const [user, setUser] = useState(null);
 
-    useEffect(() => setHasMounted(true), []);
+  useEffect(() => {
+    async function load() {
+      setBooting(true);
 
-    // ⏱️ Live update every minute to refresh pill colors
-    useEffect(() => {
-        const id = setInterval(() => setNow(Date.now()), 60_000);
-        return () => clearInterval(id);
-    }, []);
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
 
-    const YELLOW_HOURS = 24;
-    const ORANGE_HOURS = 12;
-
-    const refreshMenu = useCallback(async () => {
-        try {
-            const all = await getMenuItems();
-            const activeItems = (all || []).filter((m) => m.is_active);
-            const todayYMD = toYMDLocal(new Date());
-            const visibleItems = activeItems.filter(
-                (m) => !m.serve_date || m.serve_date >= todayYMD
-            );
-            visibleItems.sort((a, b) =>
-                (a.serve_date || "9999-12-31").localeCompare(
-                    b.serve_date || "9999-12-31"
-                )
-            );
-            setMenu(visibleItems);
-        } catch (err) {
-            toast.error("❌ Failed to load menu.");
-        }
-    }, []);
-
-    // 🔐 Load user and menu
-    useEffect(() => {
-        async function init() {
-            const { data } = await supabase.auth.getUser();
-            if (!data?.user) {
-                window.location.href = "/login";
-                return;
-            }
-            setUser(data.user);
-            await refreshMenu();
-        }
-        init();
-    }, [refreshMenu]);
-
-    // ✅ Handle redirect query for placed/updated orders
-    useEffect(() => {
-        if (!router.isReady) return;
-        const { placed, item, ...rest } = router.query;
-
-        if (placed === "created") {
-            toast.success(`✅ Order created${item ? ` for ${item}` : ""}!`);
-        } else if (placed === "updated") {
-            toast.success(`✅ Order updated${item ? ` for ${item}` : ""}!`);
+        if (!user) {
+          window.location.href = "/login";
+          return;
         }
 
-        if (placed) {
-            router.replace({ pathname: "/menu", query: rest }, undefined, { shallow: true });
+        setUser(user);
+
+        const res = await getActiveOfferingsForMenu();
+        if (!res.ok) {
+          throw new Error(res.error || "Failed to load menu.");
         }
-    }, [router, router.isReady]);
 
-    // === Helpers ===
-    function toYMDLocal(d) {
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, "0");
-        const day = String(d.getDate()).padStart(2, "0");
-        return `${y}-${m}-${day}`;
+        setOfferings(res.data || []);
+      } catch (err) {
+        toast.error(err.message || "Failed to load menu.");
+      } finally {
+        setBooting(false);
+      }
     }
 
-    function parseYMDLocal(ymd) {
-        if (!ymd) return null;
-        const [y, m, d] = ymd.split("-").map(Number);
-        return new Date(y, m - 1, d);
-    }
+    load();
+  }, []);
 
-    function friendlyDateFromYMD(ymd) {
-        const dt = parseYMDLocal(ymd);
-        if (!dt) return "Not set";
-        return dt.toLocaleDateString(undefined, {
-            weekday: "long",
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-        });
-    }
+  const grouped = useMemo(() => {
+    const visible = (offerings || []).filter((item) => {
+      if (!item?.is_active) return false;
+      if (!item?.order_deadline) return false;
+      return !isPastDeadline(item.order_deadline);
+    });
 
-    function friendlyDateTime(d) {
-        if (!d) return "Not set";
-        return new Date(d).toLocaleString(undefined, {
-            dateStyle: "medium",
-            timeStyle: "short",
-        });
-    }
+    return groupOfferingsByServeDate(visible);
+  }, [offerings]);
 
-    function msUntil(d) {
-        if (!d) return null;
-        return new Date(d).getTime() - now;
-    }
-
-    function isExpired(item) {
-        const ms = msUntil(item?.order_deadline);
-        return ms !== null && ms <= 0;
-    }
-
-    function isVisible(item) {
-        const expired = isExpired(item);
-        const serveDate = parseYMDLocal(item.serve_date);
-        if (!serveDate) return true;
-        const endOfServe = new Date(serveDate);
-        endOfServe.setHours(23, 59, 59, 999);
-        return !expired || (expired && now < endOfServe.getTime());
-    }
-
-    function pillVariant(deadlineISO) {
-        if (!deadlineISO) return "muted";
-        const ms = msUntil(deadlineISO);
-        if (ms === null || ms <= 0) return "muted";
-        const hrs = ms / (1000 * 60 * 60);
-        if (hrs <= ORANGE_HOURS) return "orange";
-        if (hrs <= YELLOW_HOURS) return "yellow";
-        return "green";
-    }
-
-    const toCurrency = (n) =>
-        (Number(n) || 0).toLocaleString(undefined, {
-            style: "currency",
-            currency: "CAD",
-        });
-
-    const groupedByDate = useMemo(() => {
-        const map = new Map();
-        for (const m of menu) {
-            const key = m.serve_date || "unscheduled";
-            if (!map.has(key)) map.set(key, []);
-            map.get(key).push(m);
-        }
-        for (const arr of map.values())
-            arr.sort((a, b) => (a.title || "").localeCompare(b.title || ""));
-        return Array.from(map.entries())
-            .sort((a, b) =>
-                a[0] === "unscheduled"
-                    ? 1
-                    : b[0] === "unscheduled"
-                    ? -1
-                    : a[0].localeCompare(b[0])
-            )
-            .map(([dateKey, items]) => ({ dateKey, items }));
-    }, [menu]);
-
-    function goToItem(id) {
-        router.push(`/menu/${id}`);
-    }
-
-    function keyActivate(e, id) {
-        if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            goToItem(id);
-        }
-    }
-
-    const hasAnyVisible = groupedByDate.some(({ items }) =>
-        items.some((m) => isVisible(m))
-    );
-
-    // 🟢 Safe hydration
-    if (!hasMounted || !user) {
-        return (
-            <main className="menu-page">
-                <h1 className="page-title">MENU</h1>
-                <p className="loading">Loading...</p>
-            </main>
-        );
-    }
-
+  if (booting) {
     return (
-        <main className="menu-page">
-            <h1 className="page-title">MENU</h1>
+      <main className="pageShell">
+        <div className="pageTop">
+          <div className="pageTopLeft">
+            <h1 className="h1">Menu</h1>
+            <p className="p">Loading available menu offerings…</p>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
-            {!hasAnyVisible && (
-                <div className="empty-card">
-                    <h2>No active menu items</h2>
-                    <p>Please check back soon.</p>
-                </div>
-            )}
+  return (
+    <main className="pageShell">
+      <div className="pageTop">
+        <div className="pageTopLeft">
+          <h1 className="h1">Menu</h1>
+          <p className="p">
+            Choose from current offerings. Dates and deadlines are shown in Ontario time.
+          </p>
+        </div>
+      </div>
 
-            {groupedByDate.map(({ dateKey, items }) => {
-                const visibleItems = items.filter((m) => isVisible(m));
-                if (visibleItems.length === 0) return null;
+      {grouped.length === 0 ? (
+        <section className="card cardShadow">
+          <p className="p">No active menu offerings are available right now.</p>
+        </section>
+      ) : (
+        grouped.map((group) => (
+          <section key={group.serveDate} className="menuDateSection">
+            <div className="pageTop" style={{ marginBottom: "0.75rem" }}>
+              <div className="pageTopLeft">
+                <h2 className="h2">{group.label}</h2>
+              </div>
+            </div>
 
-                const deadlines = visibleItems
-                    .map((m) => m.order_deadline)
-                    .filter(Boolean)
-                    .sort((a, b) => new Date(a) - new Date(b));
-                const sharedDeadline = deadlines[0] || null;
-                const dateHuman =
-                    dateKey === "unscheduled"
-                        ? "Unscheduled"
-                        : friendlyDateFromYMD(dateKey);
-                const pillClass = `pill ${pillVariant(sharedDeadline)}`;
-                const allExpired = visibleItems.every((m) => isExpired(m));
+            <div className="menuGrid">
+              {group.offerings.map((item) => {
+                const closed = isPastDeadline(item.order_deadline);
 
                 return (
-                    <section className="date-card" key={dateKey}>
-                        <div className="date-card-header">
-                            <h2>{dateHuman}</h2>
-                            <p className="date-sub">
-                                {allExpired ? (
-                                    <span className="pill red">
-                                        Order Closed after{" "}
-                                        {friendlyDateTime(
-                                            deadlines[deadlines.length - 1]
-                                        )}
-                                    </span>
-                                ) : sharedDeadline ? (
-                                    <span className={pillClass}>
-                                        Order by {friendlyDateTime(sharedDeadline)}
-                                    </span>
-                                ) : (
-                                    <span className="pill muted">
-                                        Order window not set
-                                    </span>
-                                )}
-                            </p>
+                  <article key={item.id} className={`menuCard card cardShadow ${closed ? "menuCardClosed" : ""}`}>
+                    <div className="menuCardImageWrap">
+                      {item.image_url ? (
+                        <div style={{ position: "relative", width: "100%", aspectRatio: "1 / 1" }}>
+                          <Image
+                            src={item.image_url}
+                            alt={item.title || "Menu item"}
+                            fill
+                            style={{ objectFit: "cover" }}
+                            unoptimized
+                          />
+                        </div>
+                      ) : (
+                        <div className="menuCardImageFallback">No image</div>
+                      )}
+                    </div>
+
+                    <div className="menuCardBody">
+                      <h3 className="menuCardTitle">{item.title}</h3>
+
+                      {item.description ? (
+                        <p className="menuCardDescription">{item.description}</p>
+                      ) : (
+                        <p className="menuCardDescription">No description available.</p>
+                      )}
+
+                      <div className="menuMeta">
+                        <div className="menuMetaRow">
+                          <span className="menuMetaLabel">Price</span>
+                          <span className="menuMetaValue">${money(item.unit_price)}</span>
                         </div>
 
-                        <div className="items-grid">
-                            {visibleItems.map((m) => {
-                                const expired = isExpired(m);
-                                return (
-                                    <div
-                                        key={m.id}
-                                        role="button"
-                                        tabIndex={0}
-                                        aria-label={`View ${m.title}`}
-                                        className={`menu-tile ${
-                                            expired ? "expired" : ""
-                                        }`}
-                                        onClick={() => !expired && goToItem(m.id)}
-                                        onKeyDown={(e) =>
-                                            !expired && keyActivate(e, m.id)
-                                        }
-                                        title={expired ? "Ordering closed" : "View & order"}
-                                    >
-                                        <div className="tile-media">
-                                            {m.image_url ? (
-                                                <img src={m.image_url} alt={m.title} />
-                                            ) : (
-                                                <div className="media-fallback">No image</div>
-                                            )}
-                                        </div>
-                                        <div className="tile-body">
-                                            <div className="tile-title">{m.title}</div>
-                                            {/* Description removed per final design */}
-                                        </div>
-                                        <div className="tile-footer">
-                                            <div className="price">
-                                                {toCurrency(m.price)} + HST (13%)
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            })}
+                        <div className="menuMetaRow">
+                          <span className="menuMetaLabel">Serve date</span>
+                          <span className="menuMetaValue">{formatServeDate(item.serve_date, { includeWeekday: true })}</span>
                         </div>
-                    </section>
+
+                        <div className="menuMetaRow">
+                          <span className="menuMetaLabel">Order deadline</span>
+                          <span className="menuMetaValue">{formatTorontoDateTime(item.order_deadline)}</span>
+                        </div>
+                      </div>
+
+                      <div className="menuCardActions">
+                        <span className={deadlinePillClass(item.order_deadline)}>
+                          {closed ? "Closed" : "Order Open"}
+                        </span>
+
+                        <Link
+                          href={`/menu/${item.id}`}
+                          className={`btn btnPrimary ${closed ? "btnDisabled" : ""}`}
+                          aria-disabled={closed}
+                          onClick={(e) => {
+                            if (closed) e.preventDefault();
+                          }}
+                        >
+                          {closed ? "Closed" : "Order"}
+                        </Link>
+                      </div>
+                    </div>
+                  </article>
                 );
-            })}</main>
-    );
+              })}
+            </div>
+          </section>
+        ))
+      )}
+    </main>
+  );
 }

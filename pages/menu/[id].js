@@ -1,255 +1,385 @@
 ﻿// pages/menu/[id].js
-import { useEffect, useState, useCallback } from "react";
+import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/router";
-import { supabase } from "../../lib/supabaseClient";
-import { getMenuItemById } from "../../lib/db/menuItems";
-import {
-  upsertOrder,
-  getUserOrderForItem,
-  calculateOrderTotals,
-} from "../../lib/db/orders";
+import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 
-export default function OrderMenuItemPage() {
+import { supabase } from "../../lib/supabaseClient";
+import { getOfferingById } from "../../lib/db/menuOfferings";
+import {
+  formatServeDate,
+  formatTorontoDateTime,
+  isPastDeadline,
+} from "../../lib/dateTime";
+
+const HST_RATE = 0.13;
+
+function money(value) {
+  const num = Number(value || 0);
+  return num.toFixed(2);
+}
+
+function toCents(value) {
+  return Math.round(Number(value || 0) * 100);
+}
+
+function fromCents(cents) {
+  return (Number(cents || 0) / 100).toFixed(2);
+}
+
+export default function MenuOfferingOrderPage() {
   const router = useRouter();
   const { id } = router.query;
 
-  const [user, setUser] = useState(null);
-  const [item, setItem] = useState(null);
-  const [quantity, setQuantity] = useState(1);
-  const [loading, setLoading] = useState(true);
+  const [booting, setBooting] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  const [user, setUser] = useState(null);
+  const [offering, setOffering] = useState(null);
+
   const [existingOrder, setExistingOrder] = useState(null);
-  const [deadlinePassed, setDeadlinePassed] = useState(false);
-  const [deadlineVariant, setDeadlineVariant] = useState("green");
+  const [quantity, setQuantity] = useState(1);
+  const [notes, setNotes] = useState("");
 
-  const fetchData = useCallback(async () => {
-    if (!id) return;
-    setLoading(true);
-    try {
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData?.user) {
-        router.push("/login");
-        return;
-      }
-      setUser(userData.user);
-
-      const menuItem = await getMenuItemById(id);
-      setItem(menuItem);
-
-      if (menuItem?.order_deadline) {
-        const now = new Date();
-        const deadline = new Date(menuItem.order_deadline);
-        const diffHrs = (deadline - now) / (1000 * 60 * 60);
-
-        if (deadline < now) {
-          setDeadlinePassed(true);
-        } else {
-          setDeadlinePassed(false);
-          if (diffHrs <= 12) setDeadlineVariant("red");
-          else if (diffHrs <= 24) setDeadlineVariant("orange");
-          else setDeadlineVariant("green");
-        }
-      }
-
-      const userOrder = await getUserOrderForItem(userData.user.id, id);
-      if (userOrder) {
-        setExistingOrder(userOrder);
-        setQuantity(userOrder.quantity);
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to load item.");
-    } finally {
-      setLoading(false);
+  async function loadPage(offeringId, currentUser) {
+    const offeringRes = await getOfferingById(offeringId);
+    if (!offeringRes.ok) {
+      throw new Error(offeringRes.error || "Failed to load menu offering.");
     }
-  }, [id, router]);
+
+    const nextOffering = offeringRes.data;
+    setOffering(nextOffering);
+
+    const { data: foundOrder, error: orderError } = await supabase
+      .from("orders")
+      .select("*")
+      .eq("user_id", currentUser.id)
+      .eq("menu_offering_id", offeringId)
+      .maybeSingle();
+
+    if (orderError) {
+      throw new Error(orderError.message || "Failed to load your existing order.");
+    }
+
+    if (foundOrder) {
+      setExistingOrder(foundOrder);
+      setQuantity(Number(foundOrder.quantity || 1));
+      setNotes(foundOrder.notes || "");
+    } else {
+      setExistingOrder(null);
+      setQuantity(1);
+      setNotes("");
+    }
+  }
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    async function init() {
+      if (!router.isReady || !id) return;
 
-  const formatServeDate = (ymd) => {
-    if (!ymd) return "Not set";
-    const [y, m, d] = ymd.split("-").map(Number);
-    const dt = new Date(y, (m || 1) - 1, d || 1);
-    return dt.toLocaleDateString("en-CA", {
-      timeZone: "America/Toronto",
-      weekday: "long",
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-  };
+      setBooting(true);
 
-  const formatDeadline = (ts) => {
-    if (!ts) return "Not set";
-    const dt = new Date(ts);
-    return dt.toLocaleString("en-CA", {
-      timeZone: "America/Toronto",
-      dateStyle: "medium",
-      timeStyle: "short",
-    });
-  };
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
 
-  const adjustQuantity = (delta) =>
-    setQuantity((q) => Math.max(1, Math.min(10, q + delta)));
+        if (!user) {
+          router.replace("/login");
+          return;
+        }
 
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (!item || !user) return;
-    if (deadlinePassed) {
-      toast.error("Order deadline has passed.");
+        setUser(user);
+        await loadPage(id, user);
+      } catch (err) {
+        toast.error(err.message || "Failed to load order page.");
+      } finally {
+        setBooting(false);
+      }
+    }
+
+    init();
+  }, [router.isReady, id, router]);
+
+  const orderClosed = useMemo(() => {
+    if (!offering?.order_deadline) return true;
+    return isPastDeadline(offering.order_deadline);
+  }, [offering]);
+
+  const unitPriceCents = useMemo(() => {
+    return toCents(offering?.unit_price || 0);
+  }, [offering]);
+
+  const subtotalCents = useMemo(() => {
+    return unitPriceCents * Number(quantity || 0);
+  }, [unitPriceCents, quantity]);
+
+  const taxCents = useMemo(() => {
+    return Math.round(subtotalCents * HST_RATE);
+  }, [subtotalCents]);
+
+  const totalCents = useMemo(() => {
+    return subtotalCents + taxCents;
+  }, [subtotalCents, taxCents]);
+
+  function handleQuantityChange(nextValue) {
+    const parsed = Number(nextValue);
+
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      setQuantity(1);
+      return;
+    }
+
+    setQuantity(Math.floor(parsed));
+  }
+
+  async function handleSaveOrder() {
+    if (!user?.id) {
+      toast.error("You must be signed in.");
+      return;
+    }
+
+    if (!offering?.id) {
+      toast.error("Menu offering not loaded.");
+      return;
+    }
+
+    if (orderClosed) {
+      toast.error("This order deadline has passed.");
+      return;
+    }
+
+    if (!Number.isFinite(quantity) || quantity < 1) {
+      toast.error("Quantity must be at least 1.");
       return;
     }
 
     setSaving(true);
+
     try {
-      const orderPayload = {
+      const payload = {
         user_id: user.id,
-        menu_item_id: item.id,
-        quantity,
-        unit_price: item.price,
-        status: existingOrder ? "updated" : "created",
+        menu_offering_id: offering.id,
+        quantity: Math.floor(quantity),
+        notes: notes?.trim() || null,
+        unit_price: Number(offering.unit_price || 0),
+        status: existingOrder?.status || "active",
       };
 
-      await upsertOrder(orderPayload);
+      let result;
 
-      if (existingOrder) {
-        const oldQty = existingOrder.quantity;
-        const newQty = quantity;
-        toast.success(
-          `Your order for ${item.title} was updated (${oldQty} → ${newQty}).`
-        );
+      if (existingOrder?.id) {
+        result = await supabase
+          .from("orders")
+          .update(payload)
+          .eq("id", existingOrder.id)
+          .select()
+          .single();
       } else {
-        toast.success(`Your order for ${item.title} was placed!`);
+        result = await supabase
+          .from("orders")
+          .insert(payload)
+          .select()
+          .single();
       }
 
-      setTimeout(() => {
-        const status = existingOrder ? "updated" : "created";
-        const itemName = encodeURIComponent(item.title);
-        router.push(`/menu?placed=${status}&item=${itemName}`);
-      }, 1000);
+      if (result.error) {
+        throw new Error(result.error.message || "Failed to save order.");
+      }
+
+      setExistingOrder(result.data);
+
+      toast.success(existingOrder ? "Order updated." : "Order created.");
+
+      await loadPage(offering.id, user);
     } catch (err) {
-      console.error(err);
-      toast.error("Failed to save order ❌");
+      toast.error(err.message || "Failed to save order.");
     } finally {
       setSaving(false);
     }
   }
 
-  if (loading) return <p className="text-center mt-8">Loading menu item...</p>;
-  if (!item)
+  if (booting) {
     return (
-      <p className="text-center mt-8 text-red-600">Menu item not found.</p>
+      <main className="pageShell">
+        <div className="pageTop">
+          <div className="pageTopLeft">
+            <h1 className="h1">Loading offering…</h1>
+          </div>
+        </div>
+      </main>
     );
+  }
 
-  const totals = calculateOrderTotals({
-    quantity,
-    unit_price: item.price,
-  });
+  if (!offering) {
+    return (
+      <main className="pageShell">
+        <section className="card cardShadow">
+          <h1 className="h1">Offering not found</h1>
+          <p className="p">This menu offering could not be found.</p>
+          <div className="btnRow">
+            <Link href="/menu" className="btn btnPrimary">
+              Back to Menu
+            </Link>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   return (
-    <main className="order-item-page">
-      <div className="order-card">
-        <div className="image-wrapper">
-          {item.image_url ? (
-            <img src={item.image_url} alt={item.title} />
-          ) : (
-            <div className="image-fallback">No image</div>
-          )}
-        </div>
-
-        <div className="order-body">
-          <h1 className="order-title">{item.title}</h1>
-
-          {/* 📝 Description restored under title */}
-          {item.description && (
-            <p className="order-desc">{item.description}</p>
-          )}
-
-          <p className="order-serve">
-            <strong>Served:</strong> {formatServeDate(item.serve_date)}
+    <main className="pageShell">
+      <div className="pageTop">
+        <div className="pageTopLeft">
+          <h1 className="h1">{offering.title}</h1>
+          <p className="p">
+            Order for {formatServeDate(offering.serve_date)}.
           </p>
+        </div>
+      </div>
 
-          {item.order_deadline && (
-            <div className="deadline-pill-row">
-              <span
-                className={`deadline-pill ${
-                  deadlinePassed ? "closed" : deadlineVariant
-                }`}
-              >
-                {deadlinePassed
-                  ? "Order Closed"
-                  : `Order by ${formatDeadline(item.order_deadline)}`}
-              </span>
+      <div className="menuDetailLayout">
+        <section className="card cardShadow">
+          <div className="menuDetailImageWrap">
+            {offering.image_url ? (
+              <div style={{ position: "relative", width: "100%", aspectRatio: "1 / 1" }}>
+                <Image
+                  src={offering.image_url}
+                  alt={offering.title || "Menu item"}
+                  fill
+                  style={{ objectFit: "cover" }}
+                  unoptimized
+                />
+              </div>
+            ) : (
+              <div className="menuCardImageFallback">No image</div>
+            )}
+          </div>
+
+          <div className="menuDetailBody">
+            <h2 className="h2">{offering.title}</h2>
+
+            {offering.description ? (
+              <p className="p">{offering.description}</p>
+            ) : (
+              <p className="p">No description available.</p>
+            )}
+
+            <div className="menuMeta" style={{ marginTop: "1rem" }}>
+              <div className="menuMetaRow">
+                <span className="menuMetaLabel">Price</span>
+                <span className="menuMetaValue">${money(offering.unit_price)}</span>
+              </div>
+
+              <div className="menuMetaRow">
+                <span className="menuMetaLabel">Serve date</span>
+                <span className="menuMetaValue">{formatServeDate(offering.serve_date)}</span>
+              </div>
+
+              <div className="menuMetaRow">
+                <span className="menuMetaLabel">Order deadline</span>
+                <span className="menuMetaValue">
+                  {formatTorontoDateTime(offering.order_deadline)}
+                </span>
+              </div>
+
+              <div className="menuMetaRow">
+                <span className="menuMetaLabel">Status</span>
+                <span className="menuMetaValue">{orderClosed ? "Closed" : "Open"}</span>
+              </div>
             </div>
-          )}
+          </div>
+        </section>
 
-          {deadlinePassed ? (
-            <p className="deadline-msg">
-              ❌ Order deadline has passed. You can no longer modify this item.
+        <section className="card cardShadow">
+          <h2 className="h2">{existingOrder ? "Update Your Order" : "Place Your Order"}</h2>
+
+          {existingOrder ? (
+            <p className="p" style={{ marginBottom: "1rem" }}>
+              You already have an order for this offering. Update it below.
             </p>
           ) : (
-            <form onSubmit={handleSubmit} className="order-form">
-              <div className="qty-controls">
-                <button
-                  type="button"
-                  onClick={() => adjustQuantity(-1)}
-                  disabled={saving}
-                >
-                  −
-                </button>
-                <input
-                  type="number"
-                  min="1"
-                  max="10"
-                  value={quantity}
-                  onChange={(e) =>
-                    setQuantity(Math.max(1, Math.min(10, e.target.value)))
-                  }
-                />
-                <button
-                  type="button"
-                  onClick={() => adjustQuantity(1)}
-                  disabled={saving}
-                >
-                  +
-                </button>
-              </div>
-
-              <div className="price-breakdown">
-                <div className="line-item">
-                  <span>Base Price</span>
-                  <span>${item.price.toFixed(2)}</span>
-                </div>
-                <div className="line-item">
-                  <span>Subtotal ({quantity}x)</span>
-                  <span>${totals.subtotal}</span>
-                </div>
-                <div className="line-item">
-                  <span>HST (13%)</span>
-                  <span>${totals.tax}</span>
-                </div>
-
-                <div className="divider"></div>
-
-                <div className="line-item total">
-                  <span>Total</span>
-                  <span>${totals.total}</span>
-                </div>
-              </div>
-
-              <button type="submit" disabled={saving} className="btn-primary">
-                {saving
-                  ? "Saving..."
-                  : existingOrder
-                  ? "Update Order"
-                  : "Place Order"}
-              </button>
-            </form>
+            <p className="p" style={{ marginBottom: "1rem" }}>
+              Choose your quantity and optional notes.
+            </p>
           )}
-        </div>
-      </div></main>
+
+          {orderClosed ? (
+            <div className="errorBox" style={{ marginBottom: "1rem" }}>
+              This order deadline has passed. New changes are disabled.
+            </div>
+          ) : null}
+
+          <div className="formGroup">
+            <label className="label" htmlFor="quantity">
+              Quantity
+            </label>
+            <input
+              id="quantity"
+              type="number"
+              min="1"
+              step="1"
+              value={quantity}
+              onChange={(e) => handleQuantityChange(e.target.value)}
+              disabled={orderClosed || saving}
+              className="input"
+            />
+          </div>
+
+          <div className="formGroup">
+            <label className="label" htmlFor="notes">
+              Notes
+            </label>
+            <textarea
+              id="notes"
+              rows={4}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              disabled={orderClosed || saving}
+              className="input"
+              placeholder="Optional notes for your order"
+            />
+          </div>
+
+          <div className="priceBreakdownCard" style={{ marginTop: "1rem" }}>
+            <div className="priceRow">
+              <span>Unit price</span>
+              <span>${fromCents(unitPriceCents)}</span>
+            </div>
+            <div className="priceRow">
+              <span>Subtotal</span>
+              <span>${fromCents(subtotalCents)}</span>
+            </div>
+            <div className="priceRow">
+              <span>HST (13%)</span>
+              <span>${fromCents(taxCents)}</span>
+            </div>
+            <div className="priceRow total">
+              <span>Total</span>
+              <span>${fromCents(totalCents)}</span>
+            </div>
+          </div>
+
+          <div className="btnRow" style={{ marginTop: "1rem" }}>
+            <button
+              type="button"
+              className={`btn btnPrimary ${orderClosed || saving ? "btnDisabled" : ""}`}
+              onClick={handleSaveOrder}
+              disabled={orderClosed || saving}
+            >
+              {saving
+                ? "Saving..."
+                : existingOrder
+                ? "Update Order"
+                : "Create Order"}
+            </button>
+
+            <Link href="/menu" className="btn">
+              Back to Menu
+            </Link>
+          </div>
+        </section>
+      </div>
+    </main>
   );
 }
