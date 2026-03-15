@@ -1,4 +1,5 @@
 // pages/admin/catalog.js
+import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../../lib/supabaseClient";
 import { getProfile } from "../../lib/db/profiles";
@@ -258,7 +259,14 @@ export default function AdminCatalogPage() {
                 )}
                 {editorItem.image_url && (
                   <div className="image-preview">
-                    <img src={editorItem.image_url} alt="Preview" />
+                    <Image
+                      src={editorItem.image_url}
+                      alt="Preview"
+                      width={320}
+                      height={320}
+                      style={{ width: "100%", height: "auto", objectFit: "cover" }}
+                      unoptimized
+                    />
                   </div>
                 )}
               </div>
@@ -268,10 +276,11 @@ export default function AdminCatalogPage() {
                   className={`btn save ${!isValidForm || loading ? "disabled" : ""}`}
                   onClick={handleSave}
                   disabled={!isValidForm || loading}
+                  type="button"
                 >
                   {loading ? "⏳ Saving..." : "💾 Save"}
                 </button>
-                <button className="btn" onClick={resetEditor}>
+                <button className="btn" onClick={resetEditor} type="button">
                   Cancel
                 </button>
               </div>
@@ -308,6 +317,7 @@ export default function AdminCatalogPage() {
                 });
                 setIsNew(true);
               }}
+              type="button"
             >
               ➕ Add New
             </button>
@@ -342,11 +352,24 @@ export default function AdminCatalogPage() {
                     >
                       <td>
                         {item.image_url ? (
-                          <img
-                            src={item.image_url}
-                            alt={item.title}
-                            className="adminMenuThumb"
-                          />
+                          <div
+                            style={{
+                              position: "relative",
+                              width: 72,
+                              height: 72,
+                              overflow: "hidden",
+                              borderRadius: 8,
+                            }}
+                          >
+                            <Image
+                              src={item.image_url}
+                              alt={item.title}
+                              fill
+                              className="adminMenuThumb"
+                              style={{ objectFit: "cover" }}
+                              unoptimized
+                            />
+                          </div>
                         ) : (
                           <span>No image</span>
                         )}
@@ -373,12 +396,14 @@ export default function AdminCatalogPage() {
                                 });
                                 setIsNew(false);
                               }}
+                              type="button"
                             >
                               ✏️ Edit
                             </button>{" "}
                             <button
                               className="btn"
                               onClick={() => handleToggleStatus(item)}
+                              type="button"
                             >
                               {item.is_active ? "Archive" : "Reactivate"}
                             </button>
