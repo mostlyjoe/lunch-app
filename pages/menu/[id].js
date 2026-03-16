@@ -28,6 +28,16 @@ function fromCents(cents) {
   return (Number(cents || 0) / 100).toFixed(2);
 }
 
+function clampQuantity(value) {
+  const parsed = Math.floor(Number(value || 1));
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.max(1, Math.min(10, parsed));
+}
+
+function isCancelled(order) {
+  return String(order?.status || "").toLowerCase() === "cancelled";
+}
+
 export default function MenuOfferingOrderPage() {
   const router = useRouter();
   const { id } = router.query;
@@ -64,8 +74,8 @@ export default function MenuOfferingOrderPage() {
 
     if (foundOrder) {
       setExistingOrder(foundOrder);
-      setQuantity(Number(foundOrder.quantity || 1));
-      setNotes(foundOrder.notes || "");
+      setQuantity(clampQuantity(foundOrder.quantity || 1));
+      setNotes(foundOrder.notes && foundOrder.notes !== "Note" ? foundOrder.notes : "");
     } else {
       setExistingOrder(null);
       setQuantity(1);
@@ -106,12 +116,16 @@ export default function MenuOfferingOrderPage() {
     return isPastDeadline(offering.order_deadline);
   }, [offering]);
 
+  const existingOrderCancelled = useMemo(() => {
+    return isCancelled(existingOrder);
+  }, [existingOrder]);
+
   const unitPriceCents = useMemo(() => {
     return toCents(offering?.unit_price || 0);
   }, [offering]);
 
   const subtotalCents = useMemo(() => {
-    return unitPriceCents * Number(quantity || 0);
+    return unitPriceCents * clampQuantity(quantity);
   }, [unitPriceCents, quantity]);
 
   const taxCents = useMemo(() => {
@@ -123,14 +137,7 @@ export default function MenuOfferingOrderPage() {
   }, [subtotalCents, taxCents]);
 
   function handleQuantityChange(nextValue) {
-    const parsed = Number(nextValue);
-
-    if (!Number.isFinite(parsed) || parsed < 1) {
-      setQuantity(1);
-      return;
-    }
-
-    setQuantity(Math.floor(parsed));
+    setQuantity(clampQuantity(nextValue));
   }
 
   async function handleSaveOrder() {
@@ -149,36 +156,42 @@ export default function MenuOfferingOrderPage() {
       return;
     }
 
-    if (!Number.isFinite(quantity) || quantity < 1) {
-      toast.error("Quantity must be at least 1.");
-      return;
-    }
+    const nextQty = clampQuantity(quantity);
 
     setSaving(true);
 
     try {
-      const payload = {
+      const basePayload = {
         user_id: user.id,
         menu_offering_id: offering.id,
-        quantity: Math.floor(quantity),
+        quantity: nextQty,
         notes: notes?.trim() || null,
         unit_price: Number(offering.unit_price || 0),
-        status: existingOrder?.status || "active",
       };
 
       let result;
 
       if (existingOrder?.id) {
+        const revivePayload = {
+          ...basePayload,
+          status: "placed",
+          cancelled_at: null,
+        };
+
         result = await supabase
           .from("orders")
-          .update(payload)
+          .update(revivePayload)
           .eq("id", existingOrder.id)
           .select()
           .single();
       } else {
         result = await supabase
           .from("orders")
-          .insert(payload)
+          .insert({
+            ...basePayload,
+            status: "placed",
+            cancelled_at: null,
+          })
           .select()
           .single();
       }
@@ -189,7 +202,13 @@ export default function MenuOfferingOrderPage() {
 
       setExistingOrder(result.data);
 
-      toast.success(existingOrder ? "Order updated." : "Order created.");
+      if (existingOrderCancelled) {
+        toast.success("Order re-activated.");
+      } else if (existingOrder?.id) {
+        toast.success("Order updated.");
+      } else {
+        toast.success("Order created.");
+      }
 
       await loadPage(offering.id, user);
     } catch (err) {
@@ -292,9 +311,19 @@ export default function MenuOfferingOrderPage() {
         </section>
 
         <section className="card cardShadow">
-          <h2 className="h2">{existingOrder ? "Update Your Order" : "Place Your Order"}</h2>
+          <h2 className="h2">
+            {existingOrderCancelled
+              ? "Re-Order This Item"
+              : existingOrder
+              ? "Update Your Order"
+              : "Place Your Order"}
+          </h2>
 
-          {existingOrder ? (
+          {existingOrderCancelled ? (
+            <div className="infoBox" style={{ marginBottom: "1rem" }}>
+              You cancelled this order earlier. Saving now will re-activate it.
+            </div>
+          ) : existingOrder ? (
             <p className="p" style={{ marginBottom: "1rem" }}>
               You already have an order for this offering. Update it below.
             </p>
@@ -318,6 +347,7 @@ export default function MenuOfferingOrderPage() {
               id="quantity"
               type="number"
               min="1"
+              max="10"
               step="1"
               value={quantity}
               onChange={(e) => handleQuantityChange(e.target.value)}
@@ -369,6 +399,8 @@ export default function MenuOfferingOrderPage() {
             >
               {saving
                 ? "Saving..."
+                : existingOrderCancelled
+                ? "Re-Activate Order"
                 : existingOrder
                 ? "Update Order"
                 : "Create Order"}

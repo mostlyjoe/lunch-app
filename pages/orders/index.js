@@ -1,5 +1,6 @@
 ﻿// pages/orders/index.js
 import Image from "next/image";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 
@@ -23,6 +24,7 @@ function fromCents(cents) {
 
 function clampQuantity(value) {
   const parsed = Math.floor(Number(value || 1));
+  if (!Number.isFinite(parsed)) return 1;
   return Math.max(1, Math.min(10, parsed));
 }
 
@@ -70,6 +72,21 @@ function getDeadlineValue(order) {
   return order?.order_deadline || null;
 }
 
+function isCancelled(order) {
+  return String(order?.status || "").toLowerCase() === "cancelled";
+}
+
+function isOrderLocked(order) {
+  return !!order?.is_archived || isCancelled(order) || isPastDeadline(getDeadlineValue(order));
+}
+
+function getOrderStatusLabel(order) {
+  if (isCancelled(order)) return "Cancelled";
+  if (order?.is_archived) return "Archived";
+  if (isPastDeadline(getDeadlineValue(order))) return "Closed";
+  return order?.status || "placed";
+}
+
 function getDisplayTitle(order) {
   return order?.title || "Menu Item";
 }
@@ -84,21 +101,6 @@ function getDisplayImage(order) {
 
 function getDisplayUnitPrice(order) {
   return Number(order?.unit_price || 0);
-}
-
-function isCancelled(order) {
-  return String(order?.status || "").toLowerCase() === "cancelled";
-}
-
-function isOrderLocked(order) {
-  return !!order?.is_archived || isCancelled(order) || isPastDeadline(getDeadlineValue(order));
-}
-
-function getOrderStatusLabel(order) {
-  if (isCancelled(order)) return "Cancelled";
-  if (order?.is_archived) return "Archived";
-  if (isPastDeadline(getDeadlineValue(order))) return "Closed";
-  return order?.status || "active";
 }
 
 function normalizeOrderRow(row) {
@@ -267,11 +269,11 @@ export default function OrdersPage() {
     }
 
     const previousOrders = orders;
+    const cancelledAt = new Date().toISOString();
+
     setCancellingId(order.id);
 
     try {
-      const cancelledAt = new Date().toISOString();
-
       setOrders((prev) =>
         prev.map((item) =>
           item.id === order.id
@@ -284,17 +286,12 @@ export default function OrdersPage() {
         )
       );
 
-      const payload = {
-        status: "cancelled",
-      };
-
-      // Safe even if column does not exist yet: remove this line if your DB
-      // does not have cancelled_at.
-      payload.cancelled_at = cancelledAt;
-
       const { error } = await supabase
         .from("orders")
-        .update(payload)
+        .update({
+          status: "cancelled",
+          cancelled_at: cancelledAt,
+        })
         .eq("id", order.id);
 
       if (error) {
@@ -365,6 +362,13 @@ export default function OrdersPage() {
     }));
   }
 
+  function renderStatusClass(order, locked) {
+    if (isCancelled(order)) return "cancelled";
+    if (order.is_archived) return "archived";
+    if (locked) return "closed";
+    return "confirmed";
+  }
+
   function renderOrderCard(order, allowEditing) {
     const quantity = clampQuantity(order.quantity);
     const unitPriceCents = toCents(getDisplayUnitPrice(order));
@@ -376,233 +380,290 @@ export default function OrdersPage() {
     const statusLabel = getOrderStatusLabel(order);
 
     return (
-      <div
+      <section
         key={order.id}
-        className={`order-card ${order.is_archived ? "archived" : ""} ${isCancelled(order) ? "cancelled" : ""}`}
+        className={`card cardShadow ${order.is_archived ? "archived" : ""} ${isCancelled(order) ? "cancelled" : ""}`}
+        style={{ overflow: "hidden" }}
       >
-        <div className="order-img-wrapper">
-          {getDisplayImage(order) ? (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(220px, 260px) 1fr",
+            gap: "1rem",
+            alignItems: "start",
+          }}
+          className="orderCardGrid"
+        >
+          <div className="menuDetailImageWrap" style={{ margin: 0 }}>
+            {getDisplayImage(order) ? (
+              <div style={{ position: "relative", width: "100%", aspectRatio: "1 / 1" }}>
+                <Image
+                  src={getDisplayImage(order)}
+                  alt={getDisplayTitle(order)}
+                  fill
+                  style={{ objectFit: "cover" }}
+                  unoptimized
+                />
+              </div>
+            ) : (
+              <div className="menuCardImageFallback">No image</div>
+            )}
+          </div>
+
+          <div style={{ display: "grid", gap: "0.9rem" }}>
             <div
               style={{
-                position: "relative",
-                width: "100%",
-                maxWidth: 260,
-                aspectRatio: "1 / 1",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+                gap: "0.75rem",
+                flexWrap: "wrap",
               }}
             >
-              <Image
-                src={getDisplayImage(order)}
-                alt={getDisplayTitle(order)}
-                fill
-                className="order-img"
-                style={{ objectFit: "cover" }}
-                unoptimized
-              />
+              <div>
+                <h2 className="h2" style={{ margin: 0 }}>
+                  {getDisplayTitle(order)}
+                </h2>
+                {getDisplayDescription(order) ? (
+                  <p className="p" style={{ marginTop: "0.4rem", marginBottom: 0 }}>
+                    {getDisplayDescription(order)}
+                  </p>
+                ) : null}
+              </div>
+
+              <span className={`status-tag ${renderStatusClass(order, locked)}`}>
+                {statusLabel}
+              </span>
             </div>
-          ) : (
-            <div
-              className="order-img"
-              style={{
-                display: "grid",
-                placeItems: "center",
-                background: "#f3f4f6",
-                color: "#777",
-              }}
-            >
-              No image
+
+            <div className="menuMeta">
+              <div className="menuMetaRow">
+                <span className="menuMetaLabel">Serve date</span>
+                <span className="menuMetaValue">{formatServeDate(order.serve_date)}</span>
+              </div>
+
+              <div className="menuMetaRow">
+                <span className="menuMetaLabel">Deadline</span>
+                <span className="menuMetaValue">
+                  {formatTorontoDateTime(order.order_deadline)}
+                </span>
+              </div>
+
+              <div className="menuMetaRow">
+                <span className="menuMetaLabel">Source</span>
+                <span className="menuMetaValue">
+                  {order.source_type === "offering" ? "Current offering" : "Legacy item"}
+                </span>
+              </div>
+
+              {order.notes && order.notes !== "Note" ? (
+                <div className="menuMetaRow">
+                  <span className="menuMetaLabel">Notes</span>
+                  <span className="menuMetaValue">{order.notes}</span>
+                </div>
+              ) : null}
             </div>
-          )}
-        </div>
 
-        <div className="order-info">
-          <div className="order-header">
-            <strong>{getDisplayTitle(order)}</strong>
-            <span
-              className={`status-tag ${
-                isCancelled(order)
-                  ? "cancelled"
-                  : order.is_archived
-                  ? "archived"
-                  : locked
-                  ? "closed"
-                  : "confirmed"
-              }`}
-            >
-              {statusLabel}
-            </span>
-          </div>
+            <div className="formGroup" style={{ marginBottom: 0 }}>
+              <label className="label" htmlFor={`qty-${order.id}`}>
+                Quantity
+              </label>
 
-          {getDisplayDescription(order) ? (
-            <p className="desc">{getDisplayDescription(order)}</p>
-          ) : null}
-
-          <p className="serve">
-            <strong>Serve:</strong> {formatServeDate(order.serve_date)}
-          </p>
-
-          <p className="serve">
-            <strong>Deadline:</strong> {formatTorontoDateTime(order.order_deadline)}
-          </p>
-
-          <p className="serve">
-            <strong>Source:</strong>{" "}
-            {order.source_type === "offering" ? "New offering" : "Legacy item"}
-          </p>
-
-          {order.notes && order.notes !== "Note" ? (
-            <p className="serve">
-              <strong>Notes:</strong> {order.notes}
-            </p>
-          ) : null}
-
-          <div className="qty-controls">
-            <button
-              type="button"
-              disabled={locked || savingId === order.id}
-              onClick={() => updateOrderQuantity(order, quantity - 1)}
-            >
-              −
-            </button>
-
-            <input
-              type="number"
-              min="1"
-              max="10"
-              value={quantity}
-              disabled={locked || savingId === order.id}
-              onChange={(e) => {
-                const next = clampQuantity(e.target.value);
-
-                setOrders((prev) =>
-                  prev.map((item) =>
-                    item.id === order.id ? { ...item, quantity: next } : item
-                  )
-                );
-              }}
-              onBlur={(e) => updateOrderQuantity(order, e.target.value)}
-            />
-
-            <button
-              type="button"
-              disabled={locked || savingId === order.id}
-              onClick={() => updateOrderQuantity(order, quantity + 1)}
-            >
-              +
-            </button>
-          </div>
-
-          <div className="price-breakdown">
-            <div className="line">
-              <span>Unit</span>
-              <span>${fromCents(unitPriceCents)}</span>
-            </div>
-            <div className="line">
-              <span>Subtotal</span>
-              <span>${fromCents(subtotalCents)}</span>
-            </div>
-            <div className="line">
-              <span>HST (13%)</span>
-              <span>${fromCents(taxCents)}</span>
-            </div>
-            <div className="line total">
-              <span>Total</span>
-              <span>${fromCents(totalCents)}</span>
-            </div>
-          </div>
-
-          {locked ? (
-            <div className="deadline-msg">
-              {isCancelled(order)
-                ? "This order has been cancelled."
-                : "Editing is closed for this order."}
-            </div>
-          ) : (
-            <>
-              <button
-                type="button"
-                className="btn-save"
-                disabled={savingId === order.id}
-                onClick={() => updateOrderQuantity(order, quantity)}
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  flexWrap: "wrap",
+                }}
               >
-                {savingId === order.id ? "Saving..." : "Save Changes"}
-              </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={locked || savingId === order.id}
+                  onClick={() => updateOrderQuantity(order, quantity - 1)}
+                >
+                  −
+                </button>
 
-              <button
-                type="button"
-                className="btn-delete"
-                disabled={cancellingId === order.id}
-                onClick={() => cancelOrder(order)}
-              >
-                {cancellingId === order.id ? "Cancelling..." : "Cancel Order"}
-              </button>
-            </>
-          )}
+                <input
+                  id={`qty-${order.id}`}
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={quantity}
+                  disabled={locked || savingId === order.id}
+                  onChange={(e) => {
+                    const next = clampQuantity(e.target.value);
+
+                    setOrders((prev) =>
+                      prev.map((item) =>
+                        item.id === order.id ? { ...item, quantity: next } : item
+                      )
+                    );
+                  }}
+                  onBlur={(e) => updateOrderQuantity(order, e.target.value)}
+                  className="input"
+                  style={{ width: 100 }}
+                />
+
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={locked || savingId === order.id}
+                  onClick={() => updateOrderQuantity(order, quantity + 1)}
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            <div className="priceBreakdownCard">
+              <div className="priceRow">
+                <span>Unit price</span>
+                <span>${fromCents(unitPriceCents)}</span>
+              </div>
+              <div className="priceRow">
+                <span>Subtotal</span>
+                <span>${fromCents(subtotalCents)}</span>
+              </div>
+              <div className="priceRow">
+                <span>HST (13%)</span>
+                <span>${fromCents(taxCents)}</span>
+              </div>
+              <div className="priceRow total">
+                <span>Total</span>
+                <span>${fromCents(totalCents)}</span>
+              </div>
+            </div>
+
+            {locked ? (
+              <div className={isCancelled(order) ? "infoBox" : "errorBox"}>
+                {isCancelled(order)
+                  ? "This order has been cancelled."
+                  : "Editing is closed for this order."}
+              </div>
+            ) : (
+              <div className="btnRow">
+                <button
+                  type="button"
+                  className="btn btnPrimary"
+                  disabled={savingId === order.id}
+                  onClick={() => updateOrderQuantity(order, quantity)}
+                >
+                  {savingId === order.id ? "Saving..." : "Save Changes"}
+                </button>
+
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={cancellingId === order.id}
+                  onClick={() => cancelOrder(order)}
+                >
+                  {cancellingId === order.id ? "Cancelling..." : "Cancel Order"}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      </section>
     );
   }
 
   if (booting) {
     return (
-      <main className="orders-page">
-        <h1 className="page-title">My Orders</h1>
-        <p className="no-orders-msg">Loading your orders…</p>
+      <main className="pageShell">
+        <div className="pageTop">
+          <div className="pageTopLeft">
+            <h1 className="h1">My Orders</h1>
+            <p className="p">Loading your orders…</p>
+          </div>
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="orders-page">
-      <h1 className="page-title">My Orders</h1>
+    <main className="pageShell">
+      <div className="pageTop">
+        <div className="pageTopLeft">
+          <h1 className="h1">My Orders</h1>
+          <p className="p">Review active orders, update quantities, and see your history.</p>
+        </div>
+        <div className="pageTopRight">
+          <Link href="/menu" className="btn btnPrimary">
+            Back to Menu
+          </Link>
+        </div>
+      </div>
 
       {activeOrders.length === 0 && pastGrouped.length === 0 ? (
-        <p className="no-orders-msg">You have no orders yet.</p>
+        <section className="card cardShadow">
+          <h2 className="h2">No orders yet</h2>
+          <p className="p">You have not placed any orders yet.</p>
+          <div className="btnRow">
+            <Link href="/menu" className="btn btnPrimary">
+              Browse Menu
+            </Link>
+          </div>
+        </section>
       ) : null}
 
       {activeOrders.length > 0 ? (
-        <section className="orders-group">
-          <div className="orders-group-header">Active Orders</div>
-          <div className="orders-list">
-            {activeOrders.map((order) => renderOrderCard(order, true))}
+        <section style={{ display: "grid", gap: "1rem", marginBottom: "1.25rem" }}>
+          <div className="pageTop" style={{ marginBottom: 0 }}>
+            <div className="pageTopLeft">
+              <h2 className="h2" style={{ margin: 0 }}>
+                Active Orders
+              </h2>
+            </div>
           </div>
+
+          {activeOrders.map((order) => renderOrderCard(order, true))}
         </section>
       ) : null}
 
       {pastGrouped.length > 0 ? (
-        <section className="orders-group">
-          <div className="orders-group-header">Past Orders</div>
+        <section style={{ display: "grid", gap: "1rem" }}>
+          <div className="pageTop" style={{ marginBottom: 0 }}>
+            <div className="pageTopLeft">
+              <h2 className="h2" style={{ margin: 0 }}>
+                Past Orders
+              </h2>
+            </div>
+          </div>
 
-          <div className="month-group-list">
-            {pastGrouped.map((group) => {
-              const isOpen = !!pastMonthsOpen[group.key];
+          {pastGrouped.map((group) => {
+            const isOpen = !!pastMonthsOpen[group.key];
 
-              return (
-                <div key={group.key} className="month-group">
-                  <button
-                    type="button"
-                    className="month-toggle"
-                    onClick={() => toggleMonth(group.key)}
-                  >
-                    <span className="month-title">{group.label}</span>
-                    <span className="month-count">{group.items.length} orders</span>
-                    <span className={`chev ${isOpen ? "open" : ""}`}>⌄</span>
-                  </button>
+            return (
+              <section key={group.key} className="card cardShadow">
+                <button
+                  type="button"
+                  className="month-toggle"
+                  onClick={() => toggleMonth(group.key)}
+                >
+                  <span className="month-title">{group.label}</span>
+                  <span className="month-count">{group.items.length} orders</span>
+                  <span className={`chev ${isOpen ? "open" : ""}`}>⌄</span>
+                </button>
 
-                  <div className={`month-panel ${isOpen ? "open" : ""}`}>
-                    <div className="orders-list">
-                      {group.items.map((order) => renderOrderCard(order, false))}
-                    </div>
+                <div className={`month-panel ${isOpen ? "open" : ""}`}>
+                  <div style={{ display: "grid", gap: "1rem", marginTop: "1rem" }}>
+                    {group.items.map((order) => renderOrderCard(order, false))}
                   </div>
                 </div>
-              );
-            })}
-          </div>
+              </section>
+            );
+          })}
         </section>
       ) : null}
 
-      <div className="payment-options">
-        Payment can be collected at pickup unless your workflow says otherwise.
-      </div>
+      <section className="card cardShadow" style={{ marginTop: "1.25rem" }}>
+        <p className="p" style={{ margin: 0 }}>
+          Payment can be collected at pickup unless your workflow says otherwise.
+        </p>
+      </section>
     </main>
   );
 }
