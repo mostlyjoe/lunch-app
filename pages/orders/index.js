@@ -168,15 +168,18 @@ export default function OrdersPage() {
 
           <div className="ordersCardImageCol">
             {order.image_url ? (
-              <Image
-                src={order.image_url}
-                alt={order.title}
-                fill
-                className="ordersCardImage"
-                unoptimized
-              />
+              <div className="ordersCardImageWrap">
+                <Image
+                  src={order.image_url}
+                  alt={order.title}
+                  fill
+                  className="ordersCardImage"
+                  unoptimized
+                  sizes="(max-width: 700px) 140px, 120px"
+                />
+              </div>
             ) : (
-              <div className="menuCardImageFallback">No image</div>
+              <div className="ordersCardImageFallback">No image</div>
             )}
           </div>
 
