@@ -382,50 +382,34 @@ export default function OrdersPage() {
     return (
       <section
         key={order.id}
-        className={`card cardShadow ${order.is_archived ? "archived" : ""} ${isCancelled(order) ? "cancelled" : ""}`}
-        style={{ overflow: "hidden" }}
+        className={`card cardShadow ordersCard ${order.is_archived ? "archived" : ""} ${isCancelled(order) ? "cancelled" : ""}`}
       >
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(220px, 260px) 1fr",
-            gap: "1rem",
-            alignItems: "start",
-          }}
-          className="orderCardGrid"
-        >
-          <div className="menuDetailImageWrap" style={{ margin: 0 }}>
+        <div className="ordersCardGrid">
+          <div className="ordersCardImageCol">
             {getDisplayImage(order) ? (
-              <div style={{ position: "relative", width: "100%", aspectRatio: "1 / 1" }}>
+              <div className="ordersCardImageWrap">
                 <Image
                   src={getDisplayImage(order)}
                   alt={getDisplayTitle(order)}
                   fill
-                  style={{ objectFit: "cover" }}
+                  className="ordersCardImage"
                   unoptimized
                 />
               </div>
             ) : (
-              <div className="menuCardImageFallback">No image</div>
+              <div className="menuCardImageFallback ordersCardImageFallback">
+                No image
+              </div>
             )}
           </div>
 
-          <div style={{ display: "grid", gap: "0.9rem" }}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "flex-start",
-                gap: "0.75rem",
-                flexWrap: "wrap",
-              }}
-            >
-              <div>
-                <h2 className="h2" style={{ margin: 0 }}>
-                  {getDisplayTitle(order)}
-                </h2>
+          <div className="ordersCardContent">
+            <div className="ordersCardHeader">
+              <div className="ordersCardTitleWrap">
+                <h2 className="h2 ordersCardTitle">{getDisplayTitle(order)}</h2>
+
                 {getDisplayDescription(order) ? (
-                  <p className="p" style={{ marginTop: "0.4rem", marginBottom: 0 }}>
+                  <p className="p ordersCardDescription">
                     {getDisplayDescription(order)}
                   </p>
                 ) : null}
@@ -436,9 +420,9 @@ export default function OrdersPage() {
               </span>
             </div>
 
-            <div className="menuMeta">
+            <div className="menuMeta ordersCardMeta">
               <div className="menuMetaRow">
-                <span className="menuMetaLabel">Serve date</span>
+                <span className="menuMetaLabel">Serve</span>
                 <span className="menuMetaValue">{formatServeDate(order.serve_date)}</span>
               </div>
 
@@ -464,22 +448,13 @@ export default function OrdersPage() {
               ) : null}
             </div>
 
-            <div className="formGroup" style={{ marginBottom: 0 }}>
-              <label className="label" htmlFor={`qty-${order.id}`}>
-                Quantity
-              </label>
+            <div className="ordersCardActionsRow">
+              <div className="ordersQtyGroup">
+                <span className="ordersQtyLabel">Qty</span>
 
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.5rem",
-                  flexWrap: "wrap",
-                }}
-              >
                 <button
                   type="button"
-                  className="btn"
+                  className="btn ordersQtyBtn"
                   disabled={locked || savingId === order.id}
                   onClick={() => updateOrderQuantity(order, quantity - 1)}
                 >
@@ -503,55 +478,56 @@ export default function OrdersPage() {
                     );
                   }}
                   onBlur={(e) => updateOrderQuantity(order, e.target.value)}
-                  className="input"
-                  style={{ width: 100 }}
+                  className="input ordersQtyInput"
                 />
 
                 <button
                   type="button"
-                  className="btn"
+                  className="btn ordersQtyBtn"
                   disabled={locked || savingId === order.id}
                   onClick={() => updateOrderQuantity(order, quantity + 1)}
                 >
                   +
                 </button>
               </div>
-            </div>
 
-            <div className="priceBreakdownCard">
-              <div className="priceRow">
-                <span>Unit price</span>
-                <span>${fromCents(unitPriceCents)}</span>
-              </div>
-              <div className="priceRow">
-                <span>Subtotal</span>
-                <span>${fromCents(subtotalCents)}</span>
-              </div>
-              <div className="priceRow">
-                <span>HST (13%)</span>
-                <span>${fromCents(taxCents)}</span>
-              </div>
-              <div className="priceRow total">
-                <span>Total</span>
-                <span>${fromCents(totalCents)}</span>
+              <div className="priceBreakdownCard ordersPriceCard">
+                <div className="priceRow">
+                  <span>Unit</span>
+                  <span>${fromCents(unitPriceCents)}</span>
+                </div>
+                <div className="priceRow">
+                  <span>Subtotal</span>
+                  <span>${fromCents(subtotalCents)}</span>
+                </div>
+                <div className="priceRow">
+                  <span>HST</span>
+                  <span>${fromCents(taxCents)}</span>
+                </div>
+                <div className="priceRow total">
+                  <span>Total</span>
+                  <span>${fromCents(totalCents)}</span>
+                </div>
               </div>
             </div>
 
             {locked ? (
-              <div className={isCancelled(order) ? "infoBox" : "errorBox"}>
+              <div
+                className={`${isCancelled(order) ? "infoBox" : "errorBox"} ordersLockedMessage`}
+              >
                 {isCancelled(order)
                   ? "This order has been cancelled."
                   : "Editing is closed for this order."}
               </div>
             ) : (
-              <div className="btnRow">
+              <div className="btnRow ordersButtonRow">
                 <button
                   type="button"
                   className="btn btnPrimary"
                   disabled={savingId === order.id}
                   onClick={() => updateOrderQuantity(order, quantity)}
                 >
-                  {savingId === order.id ? "Saving..." : "Save Changes"}
+                  {savingId === order.id ? "Saving..." : "Save"}
                 </button>
 
                 <button
@@ -560,7 +536,7 @@ export default function OrdersPage() {
                   disabled={cancellingId === order.id}
                   onClick={() => cancelOrder(order)}
                 >
-                  {cancellingId === order.id ? "Cancelling..." : "Cancel Order"}
+                  {cancellingId === order.id ? "Cancelling..." : "Cancel"}
                 </button>
               </div>
             )}
@@ -588,7 +564,7 @@ export default function OrdersPage() {
       <div className="pageTop">
         <div className="pageTopLeft">
           <h1 className="h1">My Orders</h1>
-          <p className="p">Review active orders, update quantities, and see your history.</p>
+          <p className="p">Review active orders and order history.</p>
         </div>
         <div className="pageTopRight">
           <Link href="/menu" className="btn btnPrimary">
@@ -610,12 +586,10 @@ export default function OrdersPage() {
       ) : null}
 
       {activeOrders.length > 0 ? (
-        <section style={{ display: "grid", gap: "1rem", marginBottom: "1.25rem" }}>
-          <div className="pageTop" style={{ marginBottom: 0 }}>
+        <section className="ordersSection">
+          <div className="pageTop ordersSectionTop">
             <div className="pageTopLeft">
-              <h2 className="h2" style={{ margin: 0 }}>
-                Active Orders
-              </h2>
+              <h2 className="h2 ordersSectionTitle">Active Orders</h2>
             </div>
           </div>
 
@@ -624,12 +598,10 @@ export default function OrdersPage() {
       ) : null}
 
       {pastGrouped.length > 0 ? (
-        <section style={{ display: "grid", gap: "1rem" }}>
-          <div className="pageTop" style={{ marginBottom: 0 }}>
+        <section className="ordersSection">
+          <div className="pageTop ordersSectionTop">
             <div className="pageTopLeft">
-              <h2 className="h2" style={{ margin: 0 }}>
-                Past Orders
-              </h2>
+              <h2 className="h2 ordersSectionTitle">Past Orders</h2>
             </div>
           </div>
 
@@ -649,7 +621,7 @@ export default function OrdersPage() {
                 </button>
 
                 <div className={`month-panel ${isOpen ? "open" : ""}`}>
-                  <div style={{ display: "grid", gap: "1rem", marginTop: "1rem" }}>
+                  <div className="ordersMonthList">
                     {group.items.map((order) => renderOrderCard(order, false))}
                   </div>
                 </div>
@@ -659,8 +631,8 @@ export default function OrdersPage() {
         </section>
       ) : null}
 
-      <section className="card cardShadow" style={{ marginTop: "1.25rem" }}>
-        <p className="p" style={{ margin: 0 }}>
+      <section className="card cardShadow ordersFooterCard">
+        <p className="p ordersFooterText">
           Payment can be collected at pickup unless your workflow says otherwise.
         </p>
       </section>

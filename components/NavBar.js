@@ -1,7 +1,9 @@
 ﻿// components/NavBar.js
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
+
+const MOBILE_BREAKPOINT = 900; // switch earlier for tablet / half-screen feel
 
 export default function NavBar() {
   const [hasMounted, setHasMounted] = useState(false);
@@ -9,6 +11,7 @@ export default function NavBar() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [viewportKey, setViewportKey] = useState(0);
+  const [isCompactNav, setIsCompactNav] = useState(false);
 
   useEffect(() => {
     setHasMounted(true);
@@ -71,10 +74,16 @@ export default function NavBar() {
 
   useEffect(() => {
     function handleResize() {
+      const compact = window.innerWidth <= MOBILE_BREAKPOINT;
+      setIsCompactNav(compact);
       setViewportKey((prev) => prev + 1);
-      setMenuOpen(false);
+
+      if (!compact) {
+        setMenuOpen(false);
+      }
     }
 
+    handleResize();
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
@@ -95,6 +104,152 @@ export default function NavBar() {
 
   const logoLink = user ? "/menu" : "/";
 
+  const desktopLinks = useMemo(() => {
+    if (!user) {
+      return (
+        <>
+          <Link href="/login" onClick={closeMenu} className="nav-inline-link">
+            Sign In
+          </Link>
+          <Link href="/signup" onClick={closeMenu} className="nav-inline-link">
+            Sign Up
+          </Link>
+        </>
+      );
+    }
+
+    if (!isAdmin) {
+      return (
+        <>
+          <Link href="/menu" onClick={closeMenu} className="nav-inline-link">
+            Menu
+          </Link>
+          <Link href="/orders" onClick={closeMenu} className="nav-inline-link nav-nowrap">
+            My Orders
+          </Link>
+          <Link href="/profile" onClick={closeMenu} className="nav-inline-link">
+            Profile
+          </Link>
+          <button
+            onClick={() => {
+              handleSignOut();
+              closeMenu();
+            }}
+            className="link-button nav-inline-link"
+            type="button"
+          >
+            Sign Out
+          </button>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <Link href="/menu" onClick={closeMenu} className="nav-inline-link">
+          Menu
+        </Link>
+        <Link href="/admin/catalog" onClick={closeMenu} className="nav-inline-link">
+          Catalog
+        </Link>
+        <Link href="/admin/menu" onClick={closeMenu} className="nav-inline-link nav-nowrap">
+          Menu Offerings
+        </Link>
+        <Link
+          href="/admin/orders-by-shift"
+          onClick={closeMenu}
+          className="nav-inline-link nav-nowrap"
+        >
+          Orders by Shift
+        </Link>
+        <Link href="/admin/profiles" onClick={closeMenu} className="nav-inline-link nav-nowrap">
+          User Profiles
+        </Link>
+        <button
+          onClick={() => {
+            handleSignOut();
+            closeMenu();
+          }}
+          className="link-button nav-inline-link"
+          type="button"
+        >
+          Sign Out
+        </button>
+      </>
+    );
+  }, [user, isAdmin]);
+
+  const mobileLinks = useMemo(() => {
+    if (!user) {
+      return (
+        <>
+          <Link href="/login" onClick={closeMenu}>
+            Sign In
+          </Link>
+          <Link href="/signup" onClick={closeMenu}>
+            Sign Up
+          </Link>
+        </>
+      );
+    }
+
+    if (!isAdmin) {
+      return (
+        <>
+          <Link href="/menu" onClick={closeMenu}>
+            Menu
+          </Link>
+          <Link href="/orders" onClick={closeMenu}>
+            My Orders
+          </Link>
+          <Link href="/profile" onClick={closeMenu}>
+            Profile
+          </Link>
+          <button
+            onClick={() => {
+              handleSignOut();
+              closeMenu();
+            }}
+            className="dropdown-signout"
+            type="button"
+          >
+            Sign Out
+          </button>
+        </>
+      );
+    }
+
+    return (
+      <>
+        <Link href="/menu" onClick={closeMenu}>
+          Menu
+        </Link>
+        <Link href="/admin/catalog" onClick={closeMenu}>
+          Catalog
+        </Link>
+        <Link href="/admin/menu" onClick={closeMenu}>
+          Menu Offerings
+        </Link>
+        <Link href="/admin/orders-by-shift" onClick={closeMenu}>
+          Orders by Shift
+        </Link>
+        <Link href="/admin/profiles" onClick={closeMenu}>
+          User Profiles
+        </Link>
+        <button
+          onClick={() => {
+            handleSignOut();
+            closeMenu();
+          }}
+          className="dropdown-signout"
+          type="button"
+        >
+          Sign Out
+        </button>
+      </>
+    );
+  }, [user, isAdmin]);
+
   return (
     <nav key={viewportKey} className="navbar">
       <div className="navbar-inner">
@@ -112,154 +267,39 @@ export default function NavBar() {
         </div>
 
         <div className="nav-right">
-          <div className="nav-links">
-            {!user && (
-              <>
-                <Link href="/login" onClick={closeMenu}>
-                  Sign In
-                </Link>
-                <Link href="/signup" onClick={closeMenu}>
-                  Sign Up
-                </Link>
-              </>
-            )}
-
-            {user && !isAdmin && (
-              <>
-                <Link href="/menu" onClick={closeMenu}>
-                  Menu
-                </Link>
-                <Link href="/orders" onClick={closeMenu}>
-                  My Orders
-                </Link>
-                <Link href="/profile" onClick={closeMenu}>
-                  Profile
-                </Link>
-                <button
-                  onClick={() => {
-                    handleSignOut();
-                    closeMenu();
-                  }}
-                  className="link-button"
-                  type="button"
-                >
-                  Sign Out
-                </button>
-              </>
-            )}
-
-            {user && isAdmin && (
-              <>
-                <Link href="/menu" onClick={closeMenu}>
-                  Menu
-                </Link>
-                <Link href="/admin/catalog" onClick={closeMenu}>
-                  Catalog
-                </Link>
-                <Link href="/admin/menu" onClick={closeMenu}>
-                  Menu Offerings
-                </Link>
-                <Link href="/admin/orders-by-shift" onClick={closeMenu}>
-                  Orders by Shift
-                </Link>
-                <Link href="/admin/profiles" onClick={closeMenu}>
-                  User Profiles
-                </Link>
-                <button
-                  onClick={() => {
-                    handleSignOut();
-                    closeMenu();
-                  }}
-                  className="link-button"
-                  type="button"
-                >
-                  Sign Out
-                </button>
-              </>
-            )}
-          </div>
-
-          <button
-            className={`menu-toggle ${menuOpen ? "open" : ""}`}
-            onClick={() => setMenuOpen((v) => !v)}
-            aria-label="Toggle menu"
-            aria-expanded={menuOpen}
-            aria-controls="mobile-menu"
-            type="button"
-          >
-            <span className="bar top"></span>
-            <span className="bar middle"></span>
-            <span className="bar bottom"></span>
-          </button>
+          {!isCompactNav ? (
+            <div
+              className="nav-links"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.65rem",
+                flexWrap: "nowrap",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {desktopLinks}
+            </div>
+          ) : (
+            <button
+              className={`menu-toggle ${menuOpen ? "open" : ""}`}
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-label="Toggle menu"
+              aria-expanded={menuOpen}
+              aria-controls="mobile-menu"
+              type="button"
+            >
+              <span className="bar top"></span>
+              <span className="bar middle"></span>
+              <span className="bar bottom"></span>
+            </button>
+          )}
         </div>
       </div>
 
-      {menuOpen && (
+      {isCompactNav && menuOpen && (
         <div id="mobile-menu" className="mobile-menu">
-          {!user && (
-            <>
-              <Link href="/login" onClick={closeMenu}>
-                Sign In
-              </Link>
-              <Link href="/signup" onClick={closeMenu}>
-                Sign Up
-              </Link>
-            </>
-          )}
-
-          {user && !isAdmin && (
-            <>
-              <Link href="/menu" onClick={closeMenu}>
-                Menu
-              </Link>
-              <Link href="/orders" onClick={closeMenu}>
-                My Orders
-              </Link>
-              <Link href="/profile" onClick={closeMenu}>
-                Profile
-              </Link>
-              <button
-                onClick={() => {
-                  handleSignOut();
-                  closeMenu();
-                }}
-                className="dropdown-signout"
-                type="button"
-              >
-                Sign Out
-              </button>
-            </>
-          )}
-
-          {user && isAdmin && (
-            <>
-              <Link href="/menu" onClick={closeMenu}>
-                Menu
-              </Link>
-              <Link href="/admin/catalog" onClick={closeMenu}>
-                Catalog
-              </Link>
-              <Link href="/admin/menu" onClick={closeMenu}>
-                Menu Offerings
-              </Link>
-              <Link href="/admin/orders-by-shift" onClick={closeMenu}>
-                Orders by Shift
-              </Link>
-              <Link href="/admin/profiles" onClick={closeMenu}>
-                User Profiles
-              </Link>
-              <button
-                onClick={() => {
-                  handleSignOut();
-                  closeMenu();
-                }}
-                className="dropdown-signout"
-                type="button"
-              >
-                Sign Out
-              </button>
-            </>
-          )}
+          {mobileLinks}
         </div>
       )}
     </nav>
