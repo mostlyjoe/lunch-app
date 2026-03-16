@@ -12,42 +12,87 @@ import { getProfile } from "../lib/db/profiles";
 /**
  * Milestone 0: Site-wide "Under Construction" gate
  * - Everyone is redirected to /under-construction
- * - ONLY users whose profiles.is_admin === true can access the rest of the site
+ * - Admins can access the full site
+ * - One specific non-admin profile can also access normal user pages for testing
  *
  * Notes:
  * - This is a client-side guard (Pages Router). Good for temporary lock while refactoring.
  * - Your real security is still Supabase Auth + RLS.
+ * - This DOES NOT make the whitelisted user an admin.
  */
+
+// ✅ Change these to the exact profile name you want to allow through the gate
+const TEST_USER_FIRST_NAME = "Jay";
+const TEST_USER_LAST_NAME = "Hernandez";
+
+function normalizeName(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function isWhitelistedNonAdmin(profile) {
+  const first = normalizeName(profile?.first_name);
+  const last = normalizeName(profile?.last_name);
+
+  return (
+    first === normalizeName(TEST_USER_FIRST_NAME) &&
+    last === normalizeName(TEST_USER_LAST_NAME)
+  );
+}
+
 export default function MyApp({ Component, pageProps }) {
   const router = useRouter();
 
-  // gate: "checking" -> isAdmin true/false
-  const [gate, setGate] = useState({ status: "checking", isAdmin: false });
+  // gate:
+  // status: "checking" | "ready"
+  // isAdmin: true/false
+  // canAccessSite: true/false
+  const [gate, setGate] = useState({
+    status: "checking",
+    isAdmin: false,
+    canAccessSite: false,
+  });
 
   const allowlist = useMemo(() => {
     // Routes always reachable (so people can sign in / recover)
     return new Set(["/under-construction", "/login", "/signup"]);
   }, []);
 
-  // Keep session state consistent (your existing behavior)
+  async function evaluateGateForUser(userId) {
+    try {
+      if (!userId) {
+        return {
+          status: "ready",
+          isAdmin: false,
+          canAccessSite: false,
+        };
+      }
+
+      const prof = await getProfile(userId);
+
+      const isAdmin = !!prof?.is_admin;
+      const isWhitelisted = isWhitelistedNonAdmin(prof);
+
+      return {
+        status: "ready",
+        isAdmin,
+        canAccessSite: isAdmin || isWhitelisted,
+      };
+    } catch {
+      return {
+        status: "ready",
+        isAdmin: false,
+        canAccessSite: false,
+      };
+    }
+  }
+
+  // Keep session state consistent
   useEffect(() => {
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      // Re-check gate on auth changes (sign-in / token refresh / etc.)
-      if (session?.user?.id) {
-        (async () => {
-          try {
-            const prof = await getProfile(session.user.id);
-            const isAdmin = !!prof?.is_admin;
-            setGate({ status: "ready", isAdmin });
-          } catch {
-            setGate({ status: "ready", isAdmin: false });
-          }
-        })();
-      } else {
-        setGate({ status: "ready", isAdmin: false });
-      }
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const nextGate = await evaluateGateForUser(session?.user?.id || null);
+      setGate(nextGate);
     });
 
     return () => subscription?.unsubscribe();
@@ -62,17 +107,19 @@ export default function MyApp({ Component, pageProps }) {
         const { data } = await supabase.auth.getSession();
         const session = data?.session;
 
-        if (!session?.user?.id) {
-          if (!cancelled) setGate({ status: "ready", isAdmin: false });
-          return;
+        const nextGate = await evaluateGateForUser(session?.user?.id || null);
+
+        if (!cancelled) {
+          setGate(nextGate);
         }
-
-        const prof = await getProfile(session.user.id);
-        const isAdmin = !!prof?.is_admin;
-
-        if (!cancelled) setGate({ status: "ready", isAdmin });
       } catch {
-        if (!cancelled) setGate({ status: "ready", isAdmin: false });
+        if (!cancelled) {
+          setGate({
+            status: "ready",
+            isAdmin: false,
+            canAccessSite: false,
+          });
+        }
       }
     })();
 
@@ -81,7 +128,7 @@ export default function MyApp({ Component, pageProps }) {
     };
   }, [router.pathname]);
 
-  // Redirect non-admins away from anything not allowlisted
+  // Redirect blocked users away from anything not allowlisted
   useEffect(() => {
     if (gate.status !== "ready") return;
 
@@ -90,11 +137,11 @@ export default function MyApp({ Component, pageProps }) {
     // allowlisted pages always reachable
     if (allowlist.has(path)) return;
 
-    // non-admin => redirect to construction
-    if (!gate.isAdmin && path !== "/under-construction") {
+    // blocked => redirect to construction
+    if (!gate.canAccessSite && path !== "/under-construction") {
       router.replace("/under-construction");
     }
-  }, [gate.status, gate.isAdmin, router, allowlist]);
+  }, [gate.status, gate.canAccessSite, router, allowlist]);
 
   // While checking, render a blank shell (prevents "flash" of real pages)
   if (gate.status !== "ready") {
@@ -117,8 +164,8 @@ export default function MyApp({ Component, pageProps }) {
 
   return (
     <>
-      {/* Only show NavBar to admins, and never on allowlisted pages */}
-      {gate.isAdmin && !isAllowlisted ? <NavBar /> : null}
+      {/* Show NavBar to admins and the temporary whitelisted non-admin user */}
+      {gate.canAccessSite && !isAllowlisted ? <NavBar /> : null}
 
       <main className="appMain">
         <Component {...pageProps} />

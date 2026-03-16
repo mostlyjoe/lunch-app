@@ -15,33 +15,64 @@ export default function NavBar() {
   }, []);
 
   useEffect(() => {
-    async function fetchUser() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+    let cancelled = false;
 
-      if (user) {
-        setUser(user);
+    async function fetchUserAndProfile(userOverride = null) {
+      try {
+        let authUser = userOverride;
+
+        if (!authUser) {
+          const {
+            data: { user: currentUser },
+          } = await supabase.auth.getUser();
+
+          authUser = currentUser || null;
+        }
+
+        if (!authUser) {
+          if (!cancelled) {
+            setUser(null);
+            setIsAdmin(false);
+          }
+          return;
+        }
 
         const { data: profile } = await supabase
           .from("profiles")
           .select("is_admin")
-          .eq("id", user.id)
+          .eq("id", authUser.id)
           .maybeSingle();
 
-        setIsAdmin(!!profile?.is_admin);
-      } else {
-        setUser(null);
-        setIsAdmin(false);
+        if (!cancelled) {
+          setUser(authUser);
+          setIsAdmin(!!profile?.is_admin);
+        }
+      } catch {
+        if (!cancelled) {
+          setUser(null);
+          setIsAdmin(false);
+        }
       }
     }
 
-    fetchUser();
+    fetchUserAndProfile();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      fetchUserAndProfile(session?.user || null);
+    });
+
+    return () => {
+      cancelled = true;
+      subscription?.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
     function handleResize() {
       setViewportKey((prev) => prev + 1);
+      setMenuOpen(false);
     }
 
     window.addEventListener("resize", handleResize);
@@ -110,6 +141,7 @@ export default function NavBar() {
                     closeMenu();
                   }}
                   className="link-button"
+                  type="button"
                 >
                   Sign Out
                 </button>
@@ -139,6 +171,7 @@ export default function NavBar() {
                     closeMenu();
                   }}
                   className="link-button"
+                  type="button"
                 >
                   Sign Out
                 </button>
