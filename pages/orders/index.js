@@ -67,15 +67,25 @@ export default function OrdersPage() {
 
       if (error) throw error;
 
-      const normalized = (data || []).map((o) => ({
-        ...o,
-        title: o.menu_offerings?.title || "Menu Item",
-        description: o.menu_offerings?.description || "",
-        image_url: o.menu_offerings?.image_url || "",
-        unit_price: o.menu_offerings?.unit_price || o.unit_price || 0,
-        serve_date: o.menu_offerings?.serve_date,
-        order_deadline: o.menu_offerings?.order_deadline,
-      }));
+      const normalized = (data || []).map((o) => {
+        const qty = clampQuantity(o.quantity);
+
+        return {
+          ...o,
+          title: o.menu_offerings?.title || "Menu Item",
+          description: o.menu_offerings?.description || "",
+          image_url: o.menu_offerings?.image_url || "",
+          unit_price: o.menu_offerings?.unit_price || o.unit_price || 0,
+          serve_date: o.menu_offerings?.serve_date,
+          order_deadline: o.menu_offerings?.order_deadline,
+
+          // local editable quantity
+          quantity: qty,
+
+          // persisted quantity last loaded/saved from DB
+          saved_quantity: qty,
+        };
+      });
 
       setOrders(normalized);
     } catch (err) {
@@ -86,10 +96,30 @@ export default function OrdersPage() {
     }
   }
 
-  async function updateQuantity(order, newQty) {
+  function setLocalQuantity(orderId, newQty) {
     const qty = clampQuantity(newQty);
 
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              quantity: qty,
+            }
+          : o
+      )
+    );
+  }
+
+  async function saveQuantity(order) {
+    const qty = clampQuantity(order.quantity);
+
     if (isOrderLocked(order)) return;
+
+    // no-op if nothing changed
+    if (qty === clampQuantity(order.saved_quantity)) {
+      return;
+    }
 
     setSavingId(order.id);
 
@@ -102,12 +132,21 @@ export default function OrdersPage() {
       if (error) throw error;
 
       setOrders((prev) =>
-        prev.map((o) => (o.id === order.id ? { ...o, quantity: qty } : o))
+        prev.map((o) =>
+          o.id === order.id
+            ? {
+                ...o,
+                quantity: qty,
+                saved_quantity: qty,
+              }
+            : o
+        )
       );
 
       toast.success("Order updated");
     } catch (err) {
       toast.error("Update failed");
+      console.error(err);
     } finally {
       setSavingId(null);
     }
@@ -119,11 +158,13 @@ export default function OrdersPage() {
     setCancelId(order.id);
 
     try {
+      const cancelledAt = new Date().toISOString();
+
       const { error } = await supabase
         .from("orders")
         .update({
           status: "cancelled",
-          cancelled_at: new Date().toISOString(),
+          cancelled_at: cancelledAt,
         })
         .eq("id", order.id);
 
@@ -132,7 +173,11 @@ export default function OrdersPage() {
       setOrders((prev) =>
         prev.map((o) =>
           o.id === order.id
-            ? { ...o, status: "cancelled", cancelled_at: new Date().toISOString() }
+            ? {
+                ...o,
+                status: "cancelled",
+                cancelled_at: cancelledAt,
+              }
             : o
         )
       );
@@ -140,6 +185,7 @@ export default function OrdersPage() {
       toast.success("Order cancelled");
     } catch (err) {
       toast.error("Cancel failed");
+      console.error(err);
     } finally {
       setCancelId(null);
     }
@@ -157,6 +203,7 @@ export default function OrdersPage() {
 
   function renderCard(order, editable) {
     const qty = clampQuantity(order.quantity);
+    const hasUnsavedChanges = qty !== clampQuantity(order.saved_quantity);
 
     const subtotal = order.unit_price * qty;
     const tax = subtotal * HST_RATE;
@@ -165,7 +212,6 @@ export default function OrdersPage() {
     return (
       <div key={order.id} className="card cardShadow ordersCard">
         <div className="ordersCardGrid">
-
           <div className="ordersCardImageCol">
             {order.image_url ? (
               <div className="ordersCardImageWrap">
@@ -184,10 +230,13 @@ export default function OrdersPage() {
           </div>
 
           <div className="ordersCardContent">
-
             <div className="ordersCardHeader">
               <h2 className="h2">{order.title}</h2>
-              <span className={`status-tag ${isCancelled(order) ? "cancelled" : "confirmed"}`}>
+              <span
+                className={`status-tag ${
+                  isCancelled(order) ? "cancelled" : "confirmed"
+                }`}
+              >
                 {order.status}
               </span>
             </div>
@@ -207,12 +256,11 @@ export default function OrdersPage() {
             </div>
 
             <div className="ordersCardActionsRow">
-
               <div className="ordersQtyGroup">
                 <button
                   className="ordersQtyBtn"
                   disabled={!editable || savingId === order.id}
-                  onClick={() => updateQuantity(order, qty - 1)}
+                  onClick={() => setLocalQuantity(order.id, qty - 1)}
                 >
                   −
                 </button>
@@ -223,23 +271,15 @@ export default function OrdersPage() {
                   value={qty}
                   min="1"
                   max="10"
-                  disabled={!editable}
-                  onChange={(e) =>
-                    setOrders((prev) =>
-                      prev.map((o) =>
-                        o.id === order.id
-                          ? { ...o, quantity: clampQuantity(e.target.value) }
-                          : o
-                      )
-                    )
-                  }
-                  onBlur={(e) => updateQuantity(order, e.target.value)}
+                  disabled={!editable || savingId === order.id}
+                  onChange={(e) => setLocalQuantity(order.id, e.target.value)}
+                  onBlur={(e) => setLocalQuantity(order.id, e.target.value)}
                 />
 
                 <button
                   className="ordersQtyBtn"
                   disabled={!editable || savingId === order.id}
-                  onClick={() => updateQuantity(order, qty + 1)}
+                  onClick={() => setLocalQuantity(order.id, qty + 1)}
                 >
                   +
                 </button>
@@ -272,22 +312,31 @@ export default function OrdersPage() {
               <div className="btnRow">
                 <button
                   className="btn btnPrimary"
-                  disabled={savingId === order.id}
-                  onClick={() => updateQuantity(order, qty)}
+                  disabled={savingId === order.id || !hasUnsavedChanges}
+                  onClick={() => saveQuantity(order)}
                 >
-                  Save
+                  {savingId === order.id ? "Saving..." : "Save"}
                 </button>
 
                 <button
                   className="btn"
-                  disabled={cancelId === order.id}
+                  disabled={!hasUnsavedChanges || savingId === order.id}
+                  onClick={() =>
+                    setLocalQuantity(order.id, order.saved_quantity)
+                  }
+                >
+                  Reset
+                </button>
+
+                <button
+                  className="btn"
+                  disabled={cancelId === order.id || savingId === order.id}
                   onClick={() => cancelOrder(order)}
                 >
-                  Cancel
+                  {cancelId === order.id ? "Cancelling..." : "Cancel"}
                 </button>
               </div>
             )}
-
           </div>
         </div>
       </div>
@@ -305,7 +354,6 @@ export default function OrdersPage() {
 
   return (
     <main className="pageShell">
-
       <div className="pageTop">
         <div>
           <h1 className="h1">My Orders</h1>
@@ -336,7 +384,6 @@ export default function OrdersPage() {
           <p>You have no orders yet.</p>
         </div>
       )}
-
     </main>
   );
 }
