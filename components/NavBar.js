@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabaseClient";
 
-const MOBILE_BREAKPOINT = 900; // switch earlier for tablet / half-screen feel
+const MOBILE_BREAKPOINT = 900;
 
 export default function NavBar() {
   const [hasMounted, setHasMounted] = useState(false);
@@ -87,8 +87,6 @@ export default function NavBar() {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
-
-  if (!hasMounted) return null;
 
   async function handleSignOut() {
     await supabase.auth.signOut();
@@ -250,6 +248,8 @@ export default function NavBar() {
     );
   }, [user, isAdmin]);
 
+  if (!hasMounted) return null;
+
   return (
     <nav key={viewportKey} className="navbar">
       <div className="navbar-inner">
@@ -268,16 +268,7 @@ export default function NavBar() {
 
         <div className="nav-right">
           {!isCompactNav ? (
-            <div
-              className="nav-links"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0.65rem",
-                flexWrap: "nowrap",
-                whiteSpace: "nowrap",
-              }}
-            >
+            <div className="nav-links">
               {desktopLinks}
             </div>
           ) : (
