@@ -333,7 +333,7 @@ export default function OrdersPage() {
                   disabled={cancelId === order.id || savingId === order.id}
                   onClick={() => cancelOrder(order)}
                 >
-                  {cancelId === order.id ? "Cancelling..." : "Cancel"}
+                  {cancelId === order.id ? "Cancelling..." : "Cancel Order"}
                 </button>
               </div>
             )}
