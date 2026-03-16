@@ -268,9 +268,7 @@ export default function NavBar() {
 
         <div className="nav-right">
           {!isCompactNav ? (
-            <div className="nav-links">
-              {desktopLinks}
-            </div>
+            <div className="nav-links">{desktopLinks}</div>
           ) : (
             <button
               className={`menu-toggle ${menuOpen ? "open" : ""}`}

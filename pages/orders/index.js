@@ -1,298 +1,339 @@
-﻿// components/NavBar.js
+﻿// pages/orders/index.js
+
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "../lib/supabaseClient";
+import toast from "react-hot-toast";
 
-const MOBILE_BREAKPOINT = 900;
+import { supabase } from "../../lib/supabaseClient";
+import {
+  formatServeDate,
+  formatTorontoDateTime,
+  isPastDeadline,
+} from "../../lib/dateTime";
 
-export default function NavBar() {
-  const [hasMounted, setHasMounted] = useState(false);
-  const [user, setUser] = useState(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [viewportKey, setViewportKey] = useState(0);
-  const [isCompactNav, setIsCompactNav] = useState(false);
+const HST_RATE = 0.13;
+
+function clampQuantity(value) {
+  const parsed = Math.floor(Number(value || 1));
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.max(1, Math.min(10, parsed));
+}
+
+function isCancelled(order) {
+  return String(order?.status || "").toLowerCase() === "cancelled";
+}
+
+function isOrderLocked(order) {
+  return isCancelled(order) || isPastDeadline(order?.order_deadline);
+}
+
+export default function OrdersPage() {
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [savingId, setSavingId] = useState(null);
+  const [cancelId, setCancelId] = useState(null);
 
   useEffect(() => {
-    setHasMounted(true);
+    loadOrders();
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
+  async function loadOrders() {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-    async function fetchUserAndProfile(userOverride = null) {
-      try {
-        let authUser = userOverride;
-
-        if (!authUser) {
-          const {
-            data: { user: currentUser },
-          } = await supabase.auth.getUser();
-
-          authUser = currentUser || null;
-        }
-
-        if (!authUser) {
-          if (!cancelled) {
-            setUser(null);
-            setIsAdmin(false);
-          }
-          return;
-        }
-
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("is_admin")
-          .eq("id", authUser.id)
-          .maybeSingle();
-
-        if (!cancelled) {
-          setUser(authUser);
-          setIsAdmin(!!profile?.is_admin);
-        }
-      } catch {
-        if (!cancelled) {
-          setUser(null);
-          setIsAdmin(false);
-        }
+      if (!user) {
+        window.location.href = "/login";
+        return;
       }
+
+      const { data, error } = await supabase
+        .from("orders")
+        .select(`
+          *,
+          menu_offerings (
+            title,
+            description,
+            image_url,
+            unit_price,
+            serve_date,
+            order_deadline
+          )
+        `)
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      const normalized = (data || []).map((o) => ({
+        ...o,
+        title: o.menu_offerings?.title || "Menu Item",
+        description: o.menu_offerings?.description || "",
+        image_url: o.menu_offerings?.image_url || "",
+        unit_price: o.menu_offerings?.unit_price || o.unit_price || 0,
+        serve_date: o.menu_offerings?.serve_date,
+        order_deadline: o.menu_offerings?.order_deadline,
+      }));
+
+      setOrders(normalized);
+    } catch (err) {
+      toast.error("Failed to load orders");
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
-
-    fetchUserAndProfile();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      fetchUserAndProfile(session?.user || null);
-    });
-
-    return () => {
-      cancelled = true;
-      subscription?.unsubscribe();
-    };
-  }, []);
-
-  useEffect(() => {
-    function handleResize() {
-      const compact = window.innerWidth <= MOBILE_BREAKPOINT;
-      setIsCompactNav(compact);
-      setViewportKey((prev) => prev + 1);
-
-      if (!compact) {
-        setMenuOpen(false);
-      }
-    }
-
-    handleResize();
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  async function handleSignOut() {
-    await supabase.auth.signOut();
-    setUser(null);
-    setIsAdmin(false);
-    setMenuOpen(false);
-    window.location.href = "/";
   }
 
-  function closeMenu() {
-    setMenuOpen(false);
+  async function updateQuantity(order, newQty) {
+    const qty = clampQuantity(newQty);
+
+    if (isOrderLocked(order)) return;
+
+    setSavingId(order.id);
+
+    try {
+      const { error } = await supabase
+        .from("orders")
+        .update({ quantity: qty })
+        .eq("id", order.id);
+
+      if (error) throw error;
+
+      setOrders((prev) =>
+        prev.map((o) => (o.id === order.id ? { ...o, quantity: qty } : o))
+      );
+
+      toast.success("Order updated");
+    } catch (err) {
+      toast.error("Update failed");
+    } finally {
+      setSavingId(null);
+    }
   }
 
-  const logoLink = user ? "/menu" : "/";
+  async function cancelOrder(order) {
+    if (isOrderLocked(order)) return;
 
-  const desktopLinks = useMemo(() => {
-    if (!user) {
-      return (
-        <>
-          <Link href="/login" onClick={closeMenu} className="nav-inline-link">
-            Sign In
-          </Link>
-          <Link href="/signup" onClick={closeMenu} className="nav-inline-link">
-            Sign Up
-          </Link>
-        </>
-      );
-    }
+    setCancelId(order.id);
 
-    if (!isAdmin) {
-      return (
-        <>
-          <Link href="/menu" onClick={closeMenu} className="nav-inline-link">
-            Menu
-          </Link>
-          <Link href="/orders" onClick={closeMenu} className="nav-inline-link nav-nowrap">
-            My Orders
-          </Link>
-          <Link href="/profile" onClick={closeMenu} className="nav-inline-link">
-            Profile
-          </Link>
-          <button
-            onClick={() => {
-              handleSignOut();
-              closeMenu();
-            }}
-            className="link-button nav-inline-link"
-            type="button"
-          >
-            Sign Out
-          </button>
-        </>
+    try {
+      const { error } = await supabase
+        .from("orders")
+        .update({
+          status: "cancelled",
+          cancelled_at: new Date().toISOString(),
+        })
+        .eq("id", order.id);
+
+      if (error) throw error;
+
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.id === order.id
+            ? { ...o, status: "cancelled", cancelled_at: new Date().toISOString() }
+            : o
+        )
       );
+
+      toast.success("Order cancelled");
+    } catch (err) {
+      toast.error("Cancel failed");
+    } finally {
+      setCancelId(null);
     }
+  }
+
+  const activeOrders = useMemo(
+    () => orders.filter((o) => !isOrderLocked(o)),
+    [orders]
+  );
+
+  const pastOrders = useMemo(
+    () => orders.filter((o) => isOrderLocked(o)),
+    [orders]
+  );
+
+  function renderCard(order, editable) {
+    const qty = clampQuantity(order.quantity);
+
+    const subtotal = order.unit_price * qty;
+    const tax = subtotal * HST_RATE;
+    const total = subtotal + tax;
 
     return (
-      <>
-        <Link href="/menu" onClick={closeMenu} className="nav-inline-link">
-          Menu
-        </Link>
-        <Link href="/admin/catalog" onClick={closeMenu} className="nav-inline-link">
-          Catalog
-        </Link>
-        <Link href="/admin/menu" onClick={closeMenu} className="nav-inline-link nav-nowrap">
-          Menu Offerings
-        </Link>
-        <Link
-          href="/admin/orders-by-shift"
-          onClick={closeMenu}
-          className="nav-inline-link nav-nowrap"
-        >
-          Orders by Shift
-        </Link>
-        <Link href="/admin/profiles" onClick={closeMenu} className="nav-inline-link nav-nowrap">
-          User Profiles
-        </Link>
-        <button
-          onClick={() => {
-            handleSignOut();
-            closeMenu();
-          }}
-          className="link-button nav-inline-link"
-          type="button"
-        >
-          Sign Out
-        </button>
-      </>
-    );
-  }, [user, isAdmin]);
+      <div key={order.id} className="card cardShadow ordersCard">
+        <div className="ordersCardGrid">
 
-  const mobileLinks = useMemo(() => {
-    if (!user) {
-      return (
-        <>
-          <Link href="/login" onClick={closeMenu}>
-            Sign In
-          </Link>
-          <Link href="/signup" onClick={closeMenu}>
-            Sign Up
-          </Link>
-        </>
-      );
-    }
+          <div className="ordersCardImageCol">
+            {order.image_url ? (
+              <Image
+                src={order.image_url}
+                alt={order.title}
+                fill
+                className="ordersCardImage"
+                unoptimized
+              />
+            ) : (
+              <div className="menuCardImageFallback">No image</div>
+            )}
+          </div>
 
-    if (!isAdmin) {
-      return (
-        <>
-          <Link href="/menu" onClick={closeMenu}>
-            Menu
-          </Link>
-          <Link href="/orders" onClick={closeMenu}>
-            My Orders
-          </Link>
-          <Link href="/profile" onClick={closeMenu}>
-            Profile
-          </Link>
-          <button
-            onClick={() => {
-              handleSignOut();
-              closeMenu();
-            }}
-            className="dropdown-signout"
-            type="button"
-          >
-            Sign Out
-          </button>
-        </>
-      );
-    }
+          <div className="ordersCardContent">
 
-    return (
-      <>
-        <Link href="/menu" onClick={closeMenu}>
-          Menu
-        </Link>
-        <Link href="/admin/catalog" onClick={closeMenu}>
-          Catalog
-        </Link>
-        <Link href="/admin/menu" onClick={closeMenu}>
-          Menu Offerings
-        </Link>
-        <Link href="/admin/orders-by-shift" onClick={closeMenu}>
-          Orders by Shift
-        </Link>
-        <Link href="/admin/profiles" onClick={closeMenu}>
-          User Profiles
-        </Link>
-        <button
-          onClick={() => {
-            handleSignOut();
-            closeMenu();
-          }}
-          className="dropdown-signout"
-          type="button"
-        >
-          Sign Out
-        </button>
-      </>
-    );
-  }, [user, isAdmin]);
-
-  if (!hasMounted) return null;
-
-  return (
-    <nav key={viewportKey} className="navbar">
-      <div className="navbar-inner">
-        <div className="nav-center">
-          <Link
-            href={logoLink}
-            onClick={closeMenu}
-            className="logo-box"
-            aria-label="Go to home or menu"
-          >
-            <div className="logo-inner">
-              <span className="logo-text">LittlePorkStop</span>
+            <div className="ordersCardHeader">
+              <h2 className="h2">{order.title}</h2>
+              <span className={`status-tag ${isCancelled(order) ? "cancelled" : "confirmed"}`}>
+                {order.status}
+              </span>
             </div>
-          </Link>
-        </div>
 
-        <div className="nav-right">
-          {!isCompactNav ? (
-            <div className="nav-links">
-              {desktopLinks}
+            <p className="ordersCardDescription">{order.description}</p>
+
+            <div className="menuMeta">
+              <div className="menuMetaRow">
+                <span>Serve</span>
+                <span>{formatServeDate(order.serve_date)}</span>
+              </div>
+
+              <div className="menuMetaRow">
+                <span>Deadline</span>
+                <span>{formatTorontoDateTime(order.order_deadline)}</span>
+              </div>
             </div>
-          ) : (
-            <button
-              className={`menu-toggle ${menuOpen ? "open" : ""}`}
-              onClick={() => setMenuOpen((v) => !v)}
-              aria-label="Toggle menu"
-              aria-expanded={menuOpen}
-              aria-controls="mobile-menu"
-              type="button"
-            >
-              <span className="bar top"></span>
-              <span className="bar middle"></span>
-              <span className="bar bottom"></span>
-            </button>
-          )}
+
+            <div className="ordersCardActionsRow">
+
+              <div className="ordersQtyGroup">
+                <button
+                  className="ordersQtyBtn"
+                  disabled={!editable || savingId === order.id}
+                  onClick={() => updateQuantity(order, qty - 1)}
+                >
+                  −
+                </button>
+
+                <input
+                  className="ordersQtyInput"
+                  type="number"
+                  value={qty}
+                  min="1"
+                  max="10"
+                  disabled={!editable}
+                  onChange={(e) =>
+                    setOrders((prev) =>
+                      prev.map((o) =>
+                        o.id === order.id
+                          ? { ...o, quantity: clampQuantity(e.target.value) }
+                          : o
+                      )
+                    )
+                  }
+                  onBlur={(e) => updateQuantity(order, e.target.value)}
+                />
+
+                <button
+                  className="ordersQtyBtn"
+                  disabled={!editable || savingId === order.id}
+                  onClick={() => updateQuantity(order, qty + 1)}
+                >
+                  +
+                </button>
+              </div>
+
+              <div className="priceBreakdownCard ordersPriceCard">
+                <div className="priceRow">
+                  <span>Unit</span>
+                  <span>${order.unit_price.toFixed(2)}</span>
+                </div>
+
+                <div className="priceRow">
+                  <span>Subtotal</span>
+                  <span>${subtotal.toFixed(2)}</span>
+                </div>
+
+                <div className="priceRow">
+                  <span>HST</span>
+                  <span>${tax.toFixed(2)}</span>
+                </div>
+
+                <div className="priceRow total">
+                  <span>Total</span>
+                  <span>${total.toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+
+            {editable && (
+              <div className="btnRow">
+                <button
+                  className="btn btnPrimary"
+                  disabled={savingId === order.id}
+                  onClick={() => updateQuantity(order, qty)}
+                >
+                  Save
+                </button>
+
+                <button
+                  className="btn"
+                  disabled={cancelId === order.id}
+                  onClick={() => cancelOrder(order)}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
+          </div>
         </div>
       </div>
+    );
+  }
 
-      {isCompactNav && menuOpen && (
-        <div id="mobile-menu" className="mobile-menu">
-          {mobileLinks}
+  if (loading) {
+    return (
+      <main className="pageShell">
+        <h1 className="h1">My Orders</h1>
+        <p>Loading...</p>
+      </main>
+    );
+  }
+
+  return (
+    <main className="pageShell">
+
+      <div className="pageTop">
+        <div>
+          <h1 className="h1">My Orders</h1>
+          <p className="p">Review your current and past orders.</p>
+        </div>
+
+        <Link href="/menu" className="btn btnPrimary">
+          Back to Menu
+        </Link>
+      </div>
+
+      {activeOrders.length > 0 && (
+        <>
+          <h2 className="h2">Active Orders</h2>
+          {activeOrders.map((o) => renderCard(o, true))}
+        </>
+      )}
+
+      {pastOrders.length > 0 && (
+        <>
+          <h2 className="h2">Past Orders</h2>
+          {pastOrders.map((o) => renderCard(o, false))}
+        </>
+      )}
+
+      {activeOrders.length === 0 && pastOrders.length === 0 && (
+        <div className="card cardShadow">
+          <p>You have no orders yet.</p>
         </div>
       )}
-    </nav>
+
+    </main>
   );
 }
