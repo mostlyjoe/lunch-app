@@ -1,641 +1,298 @@
-﻿// pages/orders/index.js
-import Image from "next/image";
+﻿// components/NavBar.js
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import toast from "react-hot-toast";
+import { supabase } from "../lib/supabaseClient";
 
-import { supabase } from "../../lib/supabaseClient";
-import {
-  formatServeDate,
-  formatTorontoDateTime,
-  isPastDeadline,
-} from "../../lib/dateTime";
+const MOBILE_BREAKPOINT = 900;
 
-const HST_RATE = 0.13;
-const MONTHS_OPEN_KEY = "ordersPastMonthsOpen";
-
-function toCents(value) {
-  return Math.round(Number(value || 0) * 100);
-}
-
-function fromCents(cents) {
-  return (Number(cents || 0) / 100).toFixed(2);
-}
-
-function clampQuantity(value) {
-  const parsed = Math.floor(Number(value || 1));
-  if (!Number.isFinite(parsed)) return 1;
-  return Math.max(1, Math.min(10, parsed));
-}
-
-function monthKeyFromDate(dateStr) {
-  if (!dateStr) return "unknown";
-  const [y, m] = String(dateStr).split("-");
-  if (!y || !m) return "unknown";
-  return `${y}-${m}`;
-}
-
-function monthLabelFromKey(key) {
-  if (!key || key === "unknown") return "Past Orders";
-
-  const [y, m] = key.split("-").map(Number);
-  const dt = new Date(y, (m || 1) - 1, 1, 12, 0, 0);
-
-  return dt.toLocaleDateString("en-CA", {
-    timeZone: "America/Toronto",
-    month: "long",
-    year: "numeric",
-  });
-}
-
-function safeDateOnlyToLocal(dateStr) {
-  if (!dateStr) return null;
-
-  const [y, m, d] = String(dateStr).split("-").map(Number);
-  if (!y || !m || !d) return null;
-
-  return new Date(y, m - 1, d, 12, 0, 0);
-}
-
-function getServeTimestamp(order) {
-  if (!order?.serve_date) return 0;
-  const dt = safeDateOnlyToLocal(order.serve_date);
-  return dt ? dt.getTime() : 0;
-}
-
-function getDeadlineTimestamp(order) {
-  if (!order?.order_deadline) return 0;
-  return new Date(order.order_deadline).getTime() || 0;
-}
-
-function getDeadlineValue(order) {
-  return order?.order_deadline || null;
-}
-
-function isCancelled(order) {
-  return String(order?.status || "").toLowerCase() === "cancelled";
-}
-
-function isOrderLocked(order) {
-  return !!order?.is_archived || isCancelled(order) || isPastDeadline(getDeadlineValue(order));
-}
-
-function getOrderStatusLabel(order) {
-  if (isCancelled(order)) return "Cancelled";
-  if (order?.is_archived) return "Archived";
-  if (isPastDeadline(getDeadlineValue(order))) return "Closed";
-  return order?.status || "placed";
-}
-
-function getDisplayTitle(order) {
-  return order?.title || "Menu Item";
-}
-
-function getDisplayDescription(order) {
-  return order?.description || "";
-}
-
-function getDisplayImage(order) {
-  return order?.image_url || "";
-}
-
-function getDisplayUnitPrice(order) {
-  return Number(order?.unit_price || 0);
-}
-
-function normalizeOrderRow(row) {
-  const legacy = row.menu_items || null;
-  const modern = row.menu_offerings || null;
-
-  const title = modern?.title || legacy?.title || "Menu Item";
-  const description = modern?.description || legacy?.description || "";
-  const image_url = modern?.image_url || legacy?.image_url || "";
-  const serve_date = modern?.serve_date || legacy?.serve_date || null;
-  const order_deadline =
-    modern?.order_deadline || legacy?.order_deadline || null;
-
-  const modernUnitPrice =
-    modern?.unit_price !== undefined && modern?.unit_price !== null
-      ? Number(modern.unit_price)
-      : null;
-
-  const rowUnitPrice =
-    row?.unit_price !== undefined && row?.unit_price !== null
-      ? Number(row.unit_price)
-      : 0;
-
-  return {
-    ...row,
-    source_type: modern ? "offering" : "legacy",
-    title,
-    description,
-    image_url,
-    serve_date,
-    order_deadline,
-    unit_price: modernUnitPrice ?? rowUnitPrice,
-    is_archived: modern ? !modern.is_active : legacy ? !legacy.is_active : false,
-  };
-}
-
-export default function OrdersPage() {
-  const [booting, setBooting] = useState(true);
-  const [orders, setOrders] = useState([]);
-  const [savingId, setSavingId] = useState(null);
-  const [cancellingId, setCancellingId] = useState(null);
-  const [pastMonthsOpen, setPastMonthsOpen] = useState({});
+export default function NavBar() {
+  const [hasMounted, setHasMounted] = useState(false);
+  const [user, setUser] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [viewportKey, setViewportKey] = useState(0);
+  const [isCompactNav, setIsCompactNav] = useState(false);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(MONTHS_OPEN_KEY);
-      if (raw) {
-        setPastMonthsOpen(JSON.parse(raw));
-      }
-    } catch {
-      setPastMonthsOpen({});
-    }
+    setHasMounted(true);
   }, []);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(MONTHS_OPEN_KEY, JSON.stringify(pastMonthsOpen));
-    } catch {}
-  }, [pastMonthsOpen]);
+    let cancelled = false;
 
-  async function loadOrders() {
-    setBooting(true);
+    async function fetchUserAndProfile(userOverride = null) {
+      try {
+        let authUser = userOverride;
 
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        if (!authUser) {
+          const {
+            data: { user: currentUser },
+          } = await supabase.auth.getUser();
 
-      if (!user) {
-        window.location.href = "/login";
-        return;
-      }
+          authUser = currentUser || null;
+        }
 
-      const { data, error } = await supabase
-        .from("orders")
-        .select(`
-          *,
-          menu_items (
-            id,
-            title,
-            description,
-            image_url,
-            serve_date,
-            order_deadline,
-            is_active
-          ),
-          menu_offerings (
-            id,
-            title,
-            description,
-            image_url,
-            unit_price,
-            serve_date,
-            order_deadline,
-            is_active
-          )
-        `)
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false });
+        if (!authUser) {
+          if (!cancelled) {
+            setUser(null);
+            setIsAdmin(false);
+          }
+          return;
+        }
 
-      if (error) {
-        throw new Error(error.message || "Failed to load orders.");
-      }
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("is_admin")
+          .eq("id", authUser.id)
+          .maybeSingle();
 
-      setOrders((data || []).map(normalizeOrderRow));
-    } catch (err) {
-      toast.error(err.message || "Failed to load orders.");
-    } finally {
-      setBooting(false);
-    }
-  }
-
-  useEffect(() => {
-    loadOrders();
-  }, []);
-
-  async function updateOrderQuantity(order, nextQuantity) {
-    const qty = clampQuantity(nextQuantity);
-    const currentQty = clampQuantity(order.quantity);
-
-    if (isOrderLocked(order)) {
-      toast.error("This order can no longer be edited.");
-      return;
-    }
-
-    if (qty === currentQty) {
-      return;
-    }
-
-    setSavingId(order.id);
-
-    try {
-      const { error } = await supabase
-        .from("orders")
-        .update({ quantity: qty })
-        .eq("id", order.id);
-
-      if (error) {
-        throw new Error(error.message || "Failed to update order.");
-      }
-
-      setOrders((prev) =>
-        prev.map((item) =>
-          item.id === order.id ? { ...item, quantity: qty } : item
-        )
-      );
-
-      toast.success("Order updated.");
-    } catch (err) {
-      toast.error(err.message || "Failed to update order.");
-
-      setOrders((prev) =>
-        prev.map((item) =>
-          item.id === order.id ? { ...item, quantity: currentQty } : item
-        )
-      );
-    } finally {
-      setSavingId(null);
-    }
-  }
-
-  async function cancelOrder(order) {
-    if (isOrderLocked(order)) {
-      toast.error("This order can no longer be cancelled.");
-      return;
-    }
-
-    const previousOrders = orders;
-    const cancelledAt = new Date().toISOString();
-
-    setCancellingId(order.id);
-
-    try {
-      setOrders((prev) =>
-        prev.map((item) =>
-          item.id === order.id
-            ? {
-                ...item,
-                status: "cancelled",
-                cancelled_at: cancelledAt,
-              }
-            : item
-        )
-      );
-
-      const { error } = await supabase
-        .from("orders")
-        .update({
-          status: "cancelled",
-          cancelled_at: cancelledAt,
-        })
-        .eq("id", order.id);
-
-      if (error) {
-        throw new Error(error.message || "Failed to cancel order.");
-      }
-
-      toast.success("Order cancelled.");
-    } catch (err) {
-      setOrders(previousOrders);
-      toast.error(err.message || "Failed to cancel order.");
-    } finally {
-      setCancellingId(null);
-    }
-  }
-
-  const { activeOrders, pastGrouped } = useMemo(() => {
-    const active = [];
-    const past = [];
-
-    for (const order of orders) {
-      if (isOrderLocked(order)) {
-        past.push(order);
-      } else {
-        active.push(order);
+        if (!cancelled) {
+          setUser(authUser);
+          setIsAdmin(!!profile?.is_admin);
+        }
+      } catch {
+        if (!cancelled) {
+          setUser(null);
+          setIsAdmin(false);
+        }
       }
     }
 
-    active.sort((a, b) => {
-      const serveDiff = getServeTimestamp(a) - getServeTimestamp(b);
-      if (serveDiff !== 0) return serveDiff;
+    fetchUserAndProfile();
 
-      return getDeadlineTimestamp(a) - getDeadlineTimestamp(b);
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      fetchUserAndProfile(session?.user || null);
     });
 
-    const monthMap = new Map();
+    return () => {
+      cancelled = true;
+      subscription?.unsubscribe();
+    };
+  }, []);
 
-    for (const order of past) {
-      const key = monthKeyFromDate(order.serve_date);
-      if (!monthMap.has(key)) monthMap.set(key, []);
-      monthMap.get(key).push(order);
+  useEffect(() => {
+    function handleResize() {
+      const compact = window.innerWidth <= MOBILE_BREAKPOINT;
+      setIsCompactNav(compact);
+      setViewportKey((prev) => prev + 1);
+
+      if (!compact) {
+        setMenuOpen(false);
+      }
     }
 
-    const grouped = Array.from(monthMap.entries())
-      .sort((a, b) => b[0].localeCompare(a[0]))
-      .map(([key, items]) => ({
-        key,
-        label: monthLabelFromKey(key),
-        items: items.sort((a, b) => {
-          const serveDiff = getServeTimestamp(b) - getServeTimestamp(a);
-          if (serveDiff !== 0) return serveDiff;
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
-          const aCreated = new Date(a.created_at || 0).getTime();
-          const bCreated = new Date(b.created_at || 0).getTime();
-          return bCreated - aCreated;
-        }),
-      }));
-
-    return {
-      activeOrders: active,
-      pastGrouped: grouped,
-    };
-  }, [orders]);
-
-  function toggleMonth(key) {
-    setPastMonthsOpen((prev) => ({
-      ...prev,
-      [key]: !prev[key],
-    }));
+  async function handleSignOut() {
+    await supabase.auth.signOut();
+    setUser(null);
+    setIsAdmin(false);
+    setMenuOpen(false);
+    window.location.href = "/";
   }
 
-  function renderStatusClass(order, locked) {
-    if (isCancelled(order)) return "cancelled";
-    if (order.is_archived) return "archived";
-    if (locked) return "closed";
-    return "confirmed";
+  function closeMenu() {
+    setMenuOpen(false);
   }
 
-  function renderOrderCard(order, allowEditing) {
-    const quantity = clampQuantity(order.quantity);
-    const unitPriceCents = toCents(getDisplayUnitPrice(order));
-    const subtotalCents = unitPriceCents * quantity;
-    const taxCents = Math.round(subtotalCents * HST_RATE);
-    const totalCents = subtotalCents + taxCents;
+  const logoLink = user ? "/menu" : "/";
 
-    const locked = !allowEditing || isOrderLocked(order);
-    const statusLabel = getOrderStatusLabel(order);
+  const desktopLinks = useMemo(() => {
+    if (!user) {
+      return (
+        <>
+          <Link href="/login" onClick={closeMenu} className="nav-inline-link">
+            Sign In
+          </Link>
+          <Link href="/signup" onClick={closeMenu} className="nav-inline-link">
+            Sign Up
+          </Link>
+        </>
+      );
+    }
+
+    if (!isAdmin) {
+      return (
+        <>
+          <Link href="/menu" onClick={closeMenu} className="nav-inline-link">
+            Menu
+          </Link>
+          <Link href="/orders" onClick={closeMenu} className="nav-inline-link nav-nowrap">
+            My Orders
+          </Link>
+          <Link href="/profile" onClick={closeMenu} className="nav-inline-link">
+            Profile
+          </Link>
+          <button
+            onClick={() => {
+              handleSignOut();
+              closeMenu();
+            }}
+            className="link-button nav-inline-link"
+            type="button"
+          >
+            Sign Out
+          </button>
+        </>
+      );
+    }
 
     return (
-      <section
-        key={order.id}
-        className={`card cardShadow ordersCard ${order.is_archived ? "archived" : ""} ${isCancelled(order) ? "cancelled" : ""}`}
-      >
-        <div className="ordersCardGrid">
-          <div className="ordersCardImageCol">
-            {getDisplayImage(order) ? (
-              <div className="ordersCardImageWrap">
-                <Image
-                  src={getDisplayImage(order)}
-                  alt={getDisplayTitle(order)}
-                  fill
-                  className="ordersCardImage"
-                  unoptimized
-                />
-              </div>
-            ) : (
-              <div className="menuCardImageFallback ordersCardImageFallback">
-                No image
-              </div>
-            )}
-          </div>
-
-          <div className="ordersCardContent">
-            <div className="ordersCardHeader">
-              <div className="ordersCardTitleWrap">
-                <h2 className="h2 ordersCardTitle">{getDisplayTitle(order)}</h2>
-
-                {getDisplayDescription(order) ? (
-                  <p className="p ordersCardDescription">
-                    {getDisplayDescription(order)}
-                  </p>
-                ) : null}
-              </div>
-
-              <span className={`status-tag ${renderStatusClass(order, locked)}`}>
-                {statusLabel}
-              </span>
-            </div>
-
-            <div className="menuMeta ordersCardMeta">
-              <div className="menuMetaRow">
-                <span className="menuMetaLabel">Serve</span>
-                <span className="menuMetaValue">{formatServeDate(order.serve_date)}</span>
-              </div>
-
-              <div className="menuMetaRow">
-                <span className="menuMetaLabel">Deadline</span>
-                <span className="menuMetaValue">
-                  {formatTorontoDateTime(order.order_deadline)}
-                </span>
-              </div>
-
-              <div className="menuMetaRow">
-                <span className="menuMetaLabel">Source</span>
-                <span className="menuMetaValue">
-                  {order.source_type === "offering" ? "Current offering" : "Legacy item"}
-                </span>
-              </div>
-
-              {order.notes && order.notes !== "Note" ? (
-                <div className="menuMetaRow">
-                  <span className="menuMetaLabel">Notes</span>
-                  <span className="menuMetaValue">{order.notes}</span>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="ordersCardActionsRow">
-              <div className="ordersQtyGroup">
-                <span className="ordersQtyLabel">Qty</span>
-
-                <button
-                  type="button"
-                  className="btn ordersQtyBtn"
-                  disabled={locked || savingId === order.id}
-                  onClick={() => updateOrderQuantity(order, quantity - 1)}
-                >
-                  −
-                </button>
-
-                <input
-                  id={`qty-${order.id}`}
-                  type="number"
-                  min="1"
-                  max="10"
-                  value={quantity}
-                  disabled={locked || savingId === order.id}
-                  onChange={(e) => {
-                    const next = clampQuantity(e.target.value);
-
-                    setOrders((prev) =>
-                      prev.map((item) =>
-                        item.id === order.id ? { ...item, quantity: next } : item
-                      )
-                    );
-                  }}
-                  onBlur={(e) => updateOrderQuantity(order, e.target.value)}
-                  className="input ordersQtyInput"
-                />
-
-                <button
-                  type="button"
-                  className="btn ordersQtyBtn"
-                  disabled={locked || savingId === order.id}
-                  onClick={() => updateOrderQuantity(order, quantity + 1)}
-                >
-                  +
-                </button>
-              </div>
-
-              <div className="priceBreakdownCard ordersPriceCard">
-                <div className="priceRow">
-                  <span>Unit</span>
-                  <span>${fromCents(unitPriceCents)}</span>
-                </div>
-                <div className="priceRow">
-                  <span>Subtotal</span>
-                  <span>${fromCents(subtotalCents)}</span>
-                </div>
-                <div className="priceRow">
-                  <span>HST</span>
-                  <span>${fromCents(taxCents)}</span>
-                </div>
-                <div className="priceRow total">
-                  <span>Total</span>
-                  <span>${fromCents(totalCents)}</span>
-                </div>
-              </div>
-            </div>
-
-            {locked ? (
-              <div
-                className={`${isCancelled(order) ? "infoBox" : "errorBox"} ordersLockedMessage`}
-              >
-                {isCancelled(order)
-                  ? "This order has been cancelled."
-                  : "Editing is closed for this order."}
-              </div>
-            ) : (
-              <div className="btnRow ordersButtonRow">
-                <button
-                  type="button"
-                  className="btn btnPrimary"
-                  disabled={savingId === order.id}
-                  onClick={() => updateOrderQuantity(order, quantity)}
-                >
-                  {savingId === order.id ? "Saving..." : "Save"}
-                </button>
-
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={cancellingId === order.id}
-                  onClick={() => cancelOrder(order)}
-                >
-                  {cancellingId === order.id ? "Cancelling..." : "Cancel"}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
+      <>
+        <Link href="/menu" onClick={closeMenu} className="nav-inline-link">
+          Menu
+        </Link>
+        <Link href="/admin/catalog" onClick={closeMenu} className="nav-inline-link">
+          Catalog
+        </Link>
+        <Link href="/admin/menu" onClick={closeMenu} className="nav-inline-link nav-nowrap">
+          Menu Offerings
+        </Link>
+        <Link
+          href="/admin/orders-by-shift"
+          onClick={closeMenu}
+          className="nav-inline-link nav-nowrap"
+        >
+          Orders by Shift
+        </Link>
+        <Link href="/admin/profiles" onClick={closeMenu} className="nav-inline-link nav-nowrap">
+          User Profiles
+        </Link>
+        <button
+          onClick={() => {
+            handleSignOut();
+            closeMenu();
+          }}
+          className="link-button nav-inline-link"
+          type="button"
+        >
+          Sign Out
+        </button>
+      </>
     );
-  }
+  }, [user, isAdmin]);
 
-  if (booting) {
+  const mobileLinks = useMemo(() => {
+    if (!user) {
+      return (
+        <>
+          <Link href="/login" onClick={closeMenu}>
+            Sign In
+          </Link>
+          <Link href="/signup" onClick={closeMenu}>
+            Sign Up
+          </Link>
+        </>
+      );
+    }
+
+    if (!isAdmin) {
+      return (
+        <>
+          <Link href="/menu" onClick={closeMenu}>
+            Menu
+          </Link>
+          <Link href="/orders" onClick={closeMenu}>
+            My Orders
+          </Link>
+          <Link href="/profile" onClick={closeMenu}>
+            Profile
+          </Link>
+          <button
+            onClick={() => {
+              handleSignOut();
+              closeMenu();
+            }}
+            className="dropdown-signout"
+            type="button"
+          >
+            Sign Out
+          </button>
+        </>
+      );
+    }
+
     return (
-      <main className="pageShell">
-        <div className="pageTop">
-          <div className="pageTopLeft">
-            <h1 className="h1">My Orders</h1>
-            <p className="p">Loading your orders…</p>
-          </div>
-        </div>
-      </main>
+      <>
+        <Link href="/menu" onClick={closeMenu}>
+          Menu
+        </Link>
+        <Link href="/admin/catalog" onClick={closeMenu}>
+          Catalog
+        </Link>
+        <Link href="/admin/menu" onClick={closeMenu}>
+          Menu Offerings
+        </Link>
+        <Link href="/admin/orders-by-shift" onClick={closeMenu}>
+          Orders by Shift
+        </Link>
+        <Link href="/admin/profiles" onClick={closeMenu}>
+          User Profiles
+        </Link>
+        <button
+          onClick={() => {
+            handleSignOut();
+            closeMenu();
+          }}
+          className="dropdown-signout"
+          type="button"
+        >
+          Sign Out
+        </button>
+      </>
     );
-  }
+  }, [user, isAdmin]);
+
+  if (!hasMounted) return null;
 
   return (
-    <main className="pageShell">
-      <div className="pageTop">
-        <div className="pageTopLeft">
-          <h1 className="h1">My Orders</h1>
-          <p className="p">Review active orders and order history.</p>
-        </div>
-        <div className="pageTopRight">
-          <Link href="/menu" className="btn btnPrimary">
-            Back to Menu
+    <nav key={viewportKey} className="navbar">
+      <div className="navbar-inner">
+        <div className="nav-center">
+          <Link
+            href={logoLink}
+            onClick={closeMenu}
+            className="logo-box"
+            aria-label="Go to home or menu"
+          >
+            <div className="logo-inner">
+              <span className="logo-text">LittlePorkStop</span>
+            </div>
           </Link>
+        </div>
+
+        <div className="nav-right">
+          {!isCompactNav ? (
+            <div className="nav-links">
+              {desktopLinks}
+            </div>
+          ) : (
+            <button
+              className={`menu-toggle ${menuOpen ? "open" : ""}`}
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-label="Toggle menu"
+              aria-expanded={menuOpen}
+              aria-controls="mobile-menu"
+              type="button"
+            >
+              <span className="bar top"></span>
+              <span className="bar middle"></span>
+              <span className="bar bottom"></span>
+            </button>
+          )}
         </div>
       </div>
 
-      {activeOrders.length === 0 && pastGrouped.length === 0 ? (
-        <section className="card cardShadow">
-          <h2 className="h2">No orders yet</h2>
-          <p className="p">You have not placed any orders yet.</p>
-          <div className="btnRow">
-            <Link href="/menu" className="btn btnPrimary">
-              Browse Menu
-            </Link>
-          </div>
-        </section>
-      ) : null}
-
-      {activeOrders.length > 0 ? (
-        <section className="ordersSection">
-          <div className="pageTop ordersSectionTop">
-            <div className="pageTopLeft">
-              <h2 className="h2 ordersSectionTitle">Active Orders</h2>
-            </div>
-          </div>
-
-          {activeOrders.map((order) => renderOrderCard(order, true))}
-        </section>
-      ) : null}
-
-      {pastGrouped.length > 0 ? (
-        <section className="ordersSection">
-          <div className="pageTop ordersSectionTop">
-            <div className="pageTopLeft">
-              <h2 className="h2 ordersSectionTitle">Past Orders</h2>
-            </div>
-          </div>
-
-          {pastGrouped.map((group) => {
-            const isOpen = !!pastMonthsOpen[group.key];
-
-            return (
-              <section key={group.key} className="card cardShadow">
-                <button
-                  type="button"
-                  className="month-toggle"
-                  onClick={() => toggleMonth(group.key)}
-                >
-                  <span className="month-title">{group.label}</span>
-                  <span className="month-count">{group.items.length} orders</span>
-                  <span className={`chev ${isOpen ? "open" : ""}`}>⌄</span>
-                </button>
-
-                <div className={`month-panel ${isOpen ? "open" : ""}`}>
-                  <div className="ordersMonthList">
-                    {group.items.map((order) => renderOrderCard(order, false))}
-                  </div>
-                </div>
-              </section>
-            );
-          })}
-        </section>
-      ) : null}
-
-      <section className="card cardShadow ordersFooterCard">
-        <p className="p ordersFooterText">
-          Payment can be collected at pickup unless your workflow says otherwise.
-        </p>
-      </section>
-    </main>
+      {isCompactNav && menuOpen && (
+        <div id="mobile-menu" className="mobile-menu">
+          {mobileLinks}
+        </div>
+      )}
+    </nav>
   );
 }
