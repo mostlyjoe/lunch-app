@@ -33,6 +33,7 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState(null);
   const [cancelId, setCancelId] = useState(null);
+  const [pendingCancelOrder, setPendingCancelOrder] = useState(null);
 
   useEffect(() => {
     loadOrders();
@@ -116,7 +117,6 @@ export default function OrdersPage() {
 
     if (isOrderLocked(order)) return;
 
-    // no-op if nothing changed
     if (qty === clampQuantity(order.saved_quantity)) {
       return;
     }
@@ -188,6 +188,7 @@ export default function OrdersPage() {
       console.error(err);
     } finally {
       setCancelId(null);
+      setPendingCancelOrder(null);
     }
   }
 
@@ -321,9 +322,7 @@ export default function OrdersPage() {
                 <button
                   className="btn"
                   disabled={!hasUnsavedChanges || savingId === order.id}
-                  onClick={() =>
-                    setLocalQuantity(order.id, order.saved_quantity)
-                  }
+                  onClick={() => setLocalQuantity(order.id, order.saved_quantity)}
                 >
                   Reset
                 </button>
@@ -331,9 +330,9 @@ export default function OrdersPage() {
                 <button
                   className="btn"
                   disabled={cancelId === order.id || savingId === order.id}
-                  onClick={() => cancelOrder(order)}
+                  onClick={() => setPendingCancelOrder(order)}
                 >
-                  {cancelId === order.id ? "Cancelling..." : "Cancel Order"}
+                  {cancelId === order.id ? "Cancelling..." : "Cancel"}
                 </button>
               </div>
             )}
@@ -384,6 +383,64 @@ export default function OrdersPage() {
           <p>You have no orders yet.</p>
         </div>
       )}
+
+      {pendingCancelOrder ? (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0, 0, 0, 0.45)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "1rem",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            className="card cardShadow"
+            style={{
+              width: "100%",
+              maxWidth: "420px",
+              margin: 0,
+            }}
+          >
+            <h3
+              style={{
+                marginTop: 0,
+                marginBottom: "0.75rem",
+              }}
+            >
+              Cancel order?
+            </h3>
+
+            <p style={{ marginTop: 0, marginBottom: "1rem" }}>
+              Are you sure you want to cancel your order for{" "}
+              <strong>{pendingCancelOrder.title}</strong>?
+            </p>
+
+            <div className="btnRow">
+              <button
+                className="btn btnPrimary"
+                disabled={cancelId === pendingCancelOrder.id}
+                onClick={() => cancelOrder(pendingCancelOrder)}
+              >
+                {cancelId === pendingCancelOrder.id
+                  ? "Cancelling..."
+                  : "Yes, Cancel Order"}
+              </button>
+
+              <button
+                className="btn"
+                disabled={cancelId === pendingCancelOrder.id}
+                onClick={() => setPendingCancelOrder(null)}
+              >
+                Keep Order
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }

@@ -74,8 +74,14 @@ export default function MenuOfferingOrderPage() {
 
     if (foundOrder) {
       setExistingOrder(foundOrder);
-      setQuantity(clampQuantity(foundOrder.quantity || 1));
-      setNotes(foundOrder.notes && foundOrder.notes !== "Note" ? foundOrder.notes : "");
+
+      if (isCancelled(foundOrder)) {
+        setQuantity(1);
+        setNotes("");
+      } else {
+        setQuantity(clampQuantity(foundOrder.quantity || 1));
+        setNotes(foundOrder.notes && foundOrder.notes !== "Note" ? foundOrder.notes : "");
+      }
     } else {
       setExistingOrder(null);
       setQuantity(1);
@@ -119,6 +125,10 @@ export default function MenuOfferingOrderPage() {
   const existingOrderCancelled = useMemo(() => {
     return isCancelled(existingOrder);
   }, [existingOrder]);
+
+  const hasActiveExistingOrder = useMemo(() => {
+    return !!existingOrder && !existingOrderCancelled;
+  }, [existingOrder, existingOrderCancelled]);
 
   const unitPriceCents = useMemo(() => {
     return toCents(offering?.unit_price || 0);
@@ -172,7 +182,7 @@ export default function MenuOfferingOrderPage() {
       let result;
 
       if (existingOrder?.id) {
-        const revivePayload = {
+        const createLikePayload = {
           ...basePayload,
           status: "placed",
           cancelled_at: null,
@@ -180,7 +190,7 @@ export default function MenuOfferingOrderPage() {
 
         result = await supabase
           .from("orders")
-          .update(revivePayload)
+          .update(createLikePayload)
           .eq("id", existingOrder.id)
           .select()
           .single();
@@ -202,9 +212,7 @@ export default function MenuOfferingOrderPage() {
 
       setExistingOrder(result.data);
 
-      if (existingOrderCancelled) {
-        toast.success("Order re-activated.");
-      } else if (existingOrder?.id) {
+      if (hasActiveExistingOrder) {
         toast.success("Order updated.");
       } else {
         toast.success("Order created.");
@@ -312,18 +320,10 @@ export default function MenuOfferingOrderPage() {
 
         <section className="card cardShadow">
           <h2 className="h2">
-            {existingOrderCancelled
-              ? "Re-Order This Item"
-              : existingOrder
-              ? "Update Your Order"
-              : "Place Your Order"}
+            {hasActiveExistingOrder ? "Update Your Order" : "Place Your Order"}
           </h2>
 
-          {existingOrderCancelled ? (
-            <div className="infoBox" style={{ marginBottom: "1rem" }}>
-              You cancelled this order earlier. Saving now will re-activate it.
-            </div>
-          ) : existingOrder ? (
+          {hasActiveExistingOrder ? (
             <p className="p" style={{ marginBottom: "1rem" }}>
               You already have an order for this offering. Update it below.
             </p>
@@ -399,9 +399,7 @@ export default function MenuOfferingOrderPage() {
             >
               {saving
                 ? "Saving..."
-                : existingOrderCancelled
-                ? "Re-Activate Order"
-                : existingOrder
+                : hasActiveExistingOrder
                 ? "Update Order"
                 : "Create Order"}
             </button>
