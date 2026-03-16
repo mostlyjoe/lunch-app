@@ -1,518 +1,596 @@
 ﻿// pages/orders/index.js
-import { useEffect, useMemo, useState, useCallback } from "react";
-import { supabase } from "../../lib/supabaseClient";
-import {
-  getUserOrders,
-  deleteOrder,
-  updateOrder,
-  calculateOrderTotals,
-} from "../../lib/db/orders";
+import Image from "next/image";
+import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 
+import { supabase } from "../../lib/supabaseClient";
+import {
+  formatServeDate,
+  formatTorontoDateTime,
+  isPastDeadline,
+} from "../../lib/dateTime";
+
+const HST_RATE = 0.13;
+const MONTHS_OPEN_KEY = "ordersPastMonthsOpen";
+
+function toCents(value) {
+  return Math.round(Number(value || 0) * 100);
+}
+
+function fromCents(cents) {
+  return (Number(cents || 0) / 100).toFixed(2);
+}
+
+function clampQuantity(value) {
+  const parsed = Math.floor(Number(value || 1));
+  return Math.max(1, Math.min(10, parsed));
+}
+
+function monthKeyFromDate(dateStr) {
+  if (!dateStr) return "unknown";
+  const [y, m] = String(dateStr).split("-");
+  if (!y || !m) return "unknown";
+  return `${y}-${m}`;
+}
+
+function monthLabelFromKey(key) {
+  if (!key || key === "unknown") return "Past Orders";
+
+  const [y, m] = key.split("-").map(Number);
+  const dt = new Date(y, (m || 1) - 1, 1, 12, 0, 0);
+
+  return dt.toLocaleDateString("en-CA", {
+    timeZone: "America/Toronto",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function safeDateOnlyToLocal(dateStr) {
+  if (!dateStr) return null;
+
+  const [y, m, d] = String(dateStr).split("-").map(Number);
+  if (!y || !m || !d) return null;
+
+  return new Date(y, m - 1, d, 12, 0, 0);
+}
+
+function getServeTimestamp(order) {
+  if (!order?.serve_date) return 0;
+  const dt = safeDateOnlyToLocal(order.serve_date);
+  return dt ? dt.getTime() : 0;
+}
+
+function getDeadlineTimestamp(order) {
+  if (!order?.order_deadline) return 0;
+  return new Date(order.order_deadline).getTime() || 0;
+}
+
+function getDeadlineValue(order) {
+  return order?.order_deadline || null;
+}
+
+function getDisplayTitle(order) {
+  return order?.title || "Menu Item";
+}
+
+function getDisplayDescription(order) {
+  return order?.description || "";
+}
+
+function getDisplayImage(order) {
+  return order?.image_url || "";
+}
+
+function getDisplayUnitPrice(order) {
+  return Number(order?.unit_price || 0);
+}
+
+function isCancelled(order) {
+  return String(order?.status || "").toLowerCase() === "cancelled";
+}
+
+function isOrderLocked(order) {
+  return !!order?.is_archived || isCancelled(order) || isPastDeadline(getDeadlineValue(order));
+}
+
+function getOrderStatusLabel(order) {
+  if (isCancelled(order)) return "Cancelled";
+  if (order?.is_archived) return "Archived";
+  if (isPastDeadline(getDeadlineValue(order))) return "Closed";
+  return order?.status || "active";
+}
+
+function normalizeOrderRow(row) {
+  const legacy = row.menu_items || null;
+  const modern = row.menu_offerings || null;
+
+  const title = modern?.title || legacy?.title || "Menu Item";
+  const description = modern?.description || legacy?.description || "";
+  const image_url = modern?.image_url || legacy?.image_url || "";
+  const serve_date = modern?.serve_date || legacy?.serve_date || null;
+  const order_deadline =
+    modern?.order_deadline || legacy?.order_deadline || null;
+
+  const modernUnitPrice =
+    modern?.unit_price !== undefined && modern?.unit_price !== null
+      ? Number(modern.unit_price)
+      : null;
+
+  const rowUnitPrice =
+    row?.unit_price !== undefined && row?.unit_price !== null
+      ? Number(row.unit_price)
+      : 0;
+
+  return {
+    ...row,
+    source_type: modern ? "offering" : "legacy",
+    title,
+    description,
+    image_url,
+    serve_date,
+    order_deadline,
+    unit_price: modernUnitPrice ?? rowUnitPrice,
+    is_archived: modern ? !modern.is_active : legacy ? !legacy.is_active : false,
+  };
+}
+
 export default function OrdersPage() {
-  const [hasMounted, setHasMounted] = useState(false);
+  const [booting, setBooting] = useState(true);
   const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState({});
   const [savingId, setSavingId] = useState(null);
-  const [confirmSheet, setConfirmSheet] = useState({ open: false, orderId: null });
-  const [expandedMonths, setExpandedMonths] = useState({});
+  const [cancellingId, setCancellingId] = useState(null);
+  const [pastMonthsOpen, setPastMonthsOpen] = useState({});
 
-  useEffect(() => setHasMounted(true), []);
-
-  // --- helpers ---
-  const parseYMD = useCallback((dateStr) => {
-    if (!dateStr) return null;
-    const clean = dateStr.includes("T") ? dateStr.slice(0, 10) : dateStr;
-    const [y, m, d] = clean.split("-").map((n) => parseInt(n, 10));
-    if (!y || !m || !d) return null;
-    return new Date(y, m - 1, d);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(MONTHS_OPEN_KEY);
+      if (raw) {
+        setPastMonthsOpen(JSON.parse(raw));
+      }
+    } catch {
+      setPastMonthsOpen({});
+    }
   }, []);
 
-  const formatDate = useCallback(
-    (dateStr) => {
-      const dt = parseYMD(dateStr);
-      if (!dt) return "Unscheduled";
-      return dt.toLocaleDateString("en-CA", {
-        weekday: "long",
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
-    },
-    [parseYMD]
-  );
-
-  const monthKey = useCallback(
-    (dateStr) => {
-      const dt = parseYMD(dateStr);
-      if (!dt) return "unscheduled";
-      const y = dt.getFullYear();
-      const m = String(dt.getMonth() + 1).padStart(2, "0");
-      return `${y}-${m}`;
-    },
-    [parseYMD]
-  );
-
-  const monthLabel = (key) => {
-    if (key === "unscheduled") return "Unscheduled";
-    const [y, m] = key.split("-").map((n) => parseInt(n, 10));
-    const dt = new Date(y, m - 1, 1);
-    return dt.toLocaleDateString("en-CA", { month: "long", year: "numeric" });
-  };
-
-  const clampQty = (v) => Math.max(1, Math.min(10, parseInt(v) || 1));
-
-  // --- effects ---
   useEffect(() => {
-    async function fetchOrders() {
-      setLoading(true);
+    try {
+      localStorage.setItem(MONTHS_OPEN_KEY, JSON.stringify(pastMonthsOpen));
+    } catch {}
+  }, [pastMonthsOpen]);
+
+  async function loadOrders() {
+    setBooting(true);
+
+    try {
       const {
         data: { user },
       } = await supabase.auth.getUser();
+
       if (!user) {
-        toast.error("You must be logged in to view orders.");
-        setLoading(false);
+        window.location.href = "/login";
         return;
       }
-      try {
-        let data = await getUserOrders(user.id);
-        data = (data || []).filter((o) => o.menu_items);
-        setOrders(data);
-      } catch {
-        toast.error("Failed to load orders.");
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchOrders();
-  }, []);
 
-  // restore expanded month state
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("ordersPastMonthsOpen");
-      if (raw) setExpandedMonths(JSON.parse(raw) || {});
-    } catch {}
-  }, []);
-  // persist expanded month state
-  useEffect(() => {
-    try {
-      localStorage.setItem("ordersPastMonthsOpen", JSON.stringify(expandedMonths));
-    } catch {}
-  }, [expandedMonths]);
-
-  // --- state mutators ---
-  const handleQuantityInput = useCallback((orderId, value) => {
-    setEditing((prev) => ({ ...prev, [orderId]: clampQty(value) }));
-  }, []);
-
-  const adjustQuantity = useCallback(
-    (orderId, delta) => {
-      setEditing((prev) => {
-        const current =
-          prev[orderId] ?? orders.find((o) => o.id === orderId)?.quantity ?? 1;
-        return { ...prev, [orderId]: clampQty(current + delta) };
-      });
-    },
-    [orders]
-  );
-
-  const handleSave = useCallback(
-    async (order) => {
-      const newQty = editing[order.id] ?? order.quantity;
-      setSavingId(order.id);
-      try {
-        await updateOrder(order.id, { quantity: newQty, status: "confirmed" });
-        setOrders((os) =>
-          os.map((o) =>
-            o.id === order.id ? { ...o, quantity: newQty, status: "confirmed" } : o
+      const { data, error } = await supabase
+        .from("orders")
+        .select(`
+          *,
+          menu_items (
+            id,
+            title,
+            description,
+            image_url,
+            serve_date,
+            order_deadline,
+            is_active
+          ),
+          menu_offerings (
+            id,
+            title,
+            description,
+            image_url,
+            unit_price,
+            serve_date,
+            order_deadline,
+            is_active
           )
-        );
-        toast.success(`✅ Order confirmed (${newQty}x ${order.menu_items.title})`);
-        setEditing((prev) => {
-          const copy = { ...prev };
-          delete copy[order.id];
-          return copy;
-        });
-      } catch {
-        toast.error("Error updating order ❌");
-      } finally {
-        setSavingId(null);
+        `)
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        throw new Error(error.message || "Failed to load orders.");
       }
-    },
-    [editing]
-  );
 
-  const openDeleteSheet = (orderId) => setConfirmSheet({ open: true, orderId });
-  const closeDeleteSheet = () => setConfirmSheet({ open: false, orderId: null });
-
-  const confirmDelete = useCallback(async () => {
-    const orderId = confirmSheet.orderId;
-    if (!orderId) return;
-    try {
-      await deleteOrder(orderId);
-      setOrders((prev) => prev.filter((o) => o.id !== orderId));
-      toast.success("🗑️ Order deleted");
-    } catch {
-      toast.error("Error deleting order ❌");
+      setOrders((data || []).map(normalizeOrderRow));
+    } catch (err) {
+      toast.error(err.message || "Failed to load orders.");
     } finally {
-      setConfirmSheet({ open: false, orderId: null });
+      setBooting(false);
     }
-  }, [confirmSheet]);
+  }
 
-  // --- computed ---
-  const today = useMemo(() => {
-    const t = new Date();
-    t.setHours(0, 0, 0, 0);
-    return t;
+  useEffect(() => {
+    loadOrders();
   }, []);
 
-  const activeOrders = useMemo(() => {
-    return orders
-      .filter((o) => {
-        const item = o.menu_items;
-        if (!item) return false;
-        const sd = parseYMD(item.serve_date);
-        return item.is_active && sd && sd >= today;
-      })
-      .sort(
-        (a, b) =>
-          (parseYMD(a.menu_items.serve_date) || 0) -
-          (parseYMD(b.menu_items.serve_date) || 0)
-      );
-  }, [orders, parseYMD, today]);
+  async function updateOrderQuantity(order, nextQuantity) {
+    const qty = clampQuantity(nextQuantity);
+    const currentQty = clampQuantity(order.quantity);
 
-  const pastOrders = useMemo(() => {
-    return orders
-      .filter((o) => {
-        const item = o.menu_items;
-        if (!item) return false;
-        const sd = parseYMD(item.serve_date);
-        return !item.is_active || !sd || sd < today;
-      })
-      .sort(
-        (a, b) =>
-          (parseYMD(b.menu_items.serve_date) || 0) -
-          (parseYMD(a.menu_items.serve_date) || 0)
-      );
-  }, [orders, parseYMD, today]);
-
-  const groupByServeDate = useCallback(
-    (list) => {
-      const map = {};
-      list.forEach((o) => {
-        const key = o.menu_items.serve_date || "Unscheduled";
-        if (!map[key]) map[key] = [];
-        map[key].push(o);
-      });
-      return Object.entries(map).sort(
-        ([a], [b]) => (parseYMD(a) || 0) - (parseYMD(b) || 0)
-      );
-    },
-    [parseYMD]
-  );
-
-  const activeGroups = useMemo(
-    () => groupByServeDate(activeOrders),
-    [activeOrders, groupByServeDate]
-  );
-
-  const pastByMonth = useMemo(() => {
-    const buckets = {};
-    for (const o of pastOrders) {
-      const key = monthKey(o.menu_items.serve_date);
-      if (!buckets[key]) buckets[key] = [];
-      buckets[key].push(o);
+    if (isOrderLocked(order)) {
+      toast.error("This order can no longer be edited.");
+      return;
     }
-    Object.keys(buckets).forEach((k) => {
-      buckets[k].sort(
-        (a, b) =>
-          (parseYMD(b.menu_items.serve_date) || 0) -
-          (parseYMD(a.menu_items.serve_date) || 0)
-      );
-    });
-    return buckets;
-  }, [pastOrders, monthKey, parseYMD]);
 
-  const monthSummaries = useMemo(() => {
-    const summaries = {};
-    for (const [k, list] of Object.entries(pastByMonth)) {
-      let minD = null;
-      let maxD = null;
-      list.forEach((o) => {
-        const d = parseYMD(o.menu_items.serve_date);
-        if (!d) return;
-        if (!minD || d < minD) minD = d;
-        if (!maxD || d > maxD) maxD = d;
-      });
-      const fmt = (d) =>
-        d ? d.toLocaleDateString("en-CA", { month: "short", day: "numeric" }) : null;
-      summaries[k] = {
-        count: list.length,
-        range:
-          minD && maxD
-            ? `${fmt(minD)} – ${fmt(maxD)}`
-            : list.some((o) => !o.menu_items.serve_date)
-            ? "Unscheduled"
-            : null,
+    if (qty === currentQty) {
+      return;
+    }
+
+    setSavingId(order.id);
+
+    try {
+      const { error } = await supabase
+        .from("orders")
+        .update({ quantity: qty })
+        .eq("id", order.id);
+
+      if (error) {
+        throw new Error(error.message || "Failed to update order.");
+      }
+
+      setOrders((prev) =>
+        prev.map((item) =>
+          item.id === order.id ? { ...item, quantity: qty } : item
+        )
+      );
+
+      toast.success("Order updated.");
+    } catch (err) {
+      toast.error(err.message || "Failed to update order.");
+
+      setOrders((prev) =>
+        prev.map((item) =>
+          item.id === order.id ? { ...item, quantity: currentQty } : item
+        )
+      );
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  async function cancelOrder(order) {
+    if (isOrderLocked(order)) {
+      toast.error("This order can no longer be cancelled.");
+      return;
+    }
+
+    const previousOrders = orders;
+    setCancellingId(order.id);
+
+    try {
+      const cancelledAt = new Date().toISOString();
+
+      setOrders((prev) =>
+        prev.map((item) =>
+          item.id === order.id
+            ? {
+                ...item,
+                status: "cancelled",
+                cancelled_at: cancelledAt,
+              }
+            : item
+        )
+      );
+
+      const payload = {
+        status: "cancelled",
       };
+
+      // Safe even if column does not exist yet: remove this line if your DB
+      // does not have cancelled_at.
+      payload.cancelled_at = cancelledAt;
+
+      const { error } = await supabase
+        .from("orders")
+        .update(payload)
+        .eq("id", order.id);
+
+      if (error) {
+        throw new Error(error.message || "Failed to cancel order.");
+      }
+
+      toast.success("Order cancelled.");
+    } catch (err) {
+      setOrders(previousOrders);
+      toast.error(err.message || "Failed to cancel order.");
+    } finally {
+      setCancellingId(null);
     }
-    return summaries;
-  }, [pastByMonth, parseYMD]);
+  }
 
-  const sortedMonthKeys = useMemo(() => {
-    const keys = Object.keys(pastByMonth);
-    return keys.sort((a, b) => {
-      if (a === "unscheduled") return 1;
-      if (b === "unscheduled") return -1;
-      return b.localeCompare(a);
+  const { activeOrders, pastGrouped } = useMemo(() => {
+    const active = [];
+    const past = [];
+
+    for (const order of orders) {
+      if (isOrderLocked(order)) {
+        past.push(order);
+      } else {
+        active.push(order);
+      }
+    }
+
+    active.sort((a, b) => {
+      const serveDiff = getServeTimestamp(a) - getServeTimestamp(b);
+      if (serveDiff !== 0) return serveDiff;
+
+      return getDeadlineTimestamp(a) - getDeadlineTimestamp(b);
     });
-  }, [pastByMonth]);
 
-  const hasOrders = orders.length > 0;
-  const hasActive = activeOrders.length > 0;
-  const hasPast = pastOrders.length > 0;
+    const monthMap = new Map();
 
-  const toggleMonth = (key) =>
-    setExpandedMonths((prev) => ({ ...prev, [key]: !prev[key] }));
+    for (const order of past) {
+      const key = monthKeyFromDate(order.serve_date);
+      if (!monthMap.has(key)) monthMap.set(key, []);
+      monthMap.get(key).push(order);
+    }
 
-  // --- early return for SSR hydration clarity ---
-  if (!hasMounted) {
+    const grouped = Array.from(monthMap.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, items]) => ({
+        key,
+        label: monthLabelFromKey(key),
+        items: items.sort((a, b) => {
+          const serveDiff = getServeTimestamp(b) - getServeTimestamp(a);
+          if (serveDiff !== 0) return serveDiff;
+
+          const aCreated = new Date(a.created_at || 0).getTime();
+          const bCreated = new Date(b.created_at || 0).getTime();
+          return bCreated - aCreated;
+        }),
+      }));
+
+    return {
+      activeOrders: active,
+      pastGrouped: grouped,
+    };
+  }, [orders]);
+
+  function toggleMonth(key) {
+    setPastMonthsOpen((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  }
+
+  function renderOrderCard(order, allowEditing) {
+    const quantity = clampQuantity(order.quantity);
+    const unitPriceCents = toCents(getDisplayUnitPrice(order));
+    const subtotalCents = unitPriceCents * quantity;
+    const taxCents = Math.round(subtotalCents * HST_RATE);
+    const totalCents = subtotalCents + taxCents;
+
+    const locked = !allowEditing || isOrderLocked(order);
+    const statusLabel = getOrderStatusLabel(order);
+
+    return (
+      <div
+        key={order.id}
+        className={`order-card ${order.is_archived ? "archived" : ""} ${isCancelled(order) ? "cancelled" : ""}`}
+      >
+        <div className="order-img-wrapper">
+          {getDisplayImage(order) ? (
+            <div
+              style={{
+                position: "relative",
+                width: "100%",
+                maxWidth: 260,
+                aspectRatio: "1 / 1",
+              }}
+            >
+              <Image
+                src={getDisplayImage(order)}
+                alt={getDisplayTitle(order)}
+                fill
+                className="order-img"
+                style={{ objectFit: "cover" }}
+                unoptimized
+              />
+            </div>
+          ) : (
+            <div
+              className="order-img"
+              style={{
+                display: "grid",
+                placeItems: "center",
+                background: "#f3f4f6",
+                color: "#777",
+              }}
+            >
+              No image
+            </div>
+          )}
+        </div>
+
+        <div className="order-info">
+          <div className="order-header">
+            <strong>{getDisplayTitle(order)}</strong>
+            <span
+              className={`status-tag ${
+                isCancelled(order)
+                  ? "cancelled"
+                  : order.is_archived
+                  ? "archived"
+                  : locked
+                  ? "closed"
+                  : "confirmed"
+              }`}
+            >
+              {statusLabel}
+            </span>
+          </div>
+
+          {getDisplayDescription(order) ? (
+            <p className="desc">{getDisplayDescription(order)}</p>
+          ) : null}
+
+          <p className="serve">
+            <strong>Serve:</strong> {formatServeDate(order.serve_date)}
+          </p>
+
+          <p className="serve">
+            <strong>Deadline:</strong> {formatTorontoDateTime(order.order_deadline)}
+          </p>
+
+          <p className="serve">
+            <strong>Source:</strong>{" "}
+            {order.source_type === "offering" ? "New offering" : "Legacy item"}
+          </p>
+
+          {order.notes && order.notes !== "Note" ? (
+            <p className="serve">
+              <strong>Notes:</strong> {order.notes}
+            </p>
+          ) : null}
+
+          <div className="qty-controls">
+            <button
+              type="button"
+              disabled={locked || savingId === order.id}
+              onClick={() => updateOrderQuantity(order, quantity - 1)}
+            >
+              −
+            </button>
+
+            <input
+              type="number"
+              min="1"
+              max="10"
+              value={quantity}
+              disabled={locked || savingId === order.id}
+              onChange={(e) => {
+                const next = clampQuantity(e.target.value);
+
+                setOrders((prev) =>
+                  prev.map((item) =>
+                    item.id === order.id ? { ...item, quantity: next } : item
+                  )
+                );
+              }}
+              onBlur={(e) => updateOrderQuantity(order, e.target.value)}
+            />
+
+            <button
+              type="button"
+              disabled={locked || savingId === order.id}
+              onClick={() => updateOrderQuantity(order, quantity + 1)}
+            >
+              +
+            </button>
+          </div>
+
+          <div className="price-breakdown">
+            <div className="line">
+              <span>Unit</span>
+              <span>${fromCents(unitPriceCents)}</span>
+            </div>
+            <div className="line">
+              <span>Subtotal</span>
+              <span>${fromCents(subtotalCents)}</span>
+            </div>
+            <div className="line">
+              <span>HST (13%)</span>
+              <span>${fromCents(taxCents)}</span>
+            </div>
+            <div className="line total">
+              <span>Total</span>
+              <span>${fromCents(totalCents)}</span>
+            </div>
+          </div>
+
+          {locked ? (
+            <div className="deadline-msg">
+              {isCancelled(order)
+                ? "This order has been cancelled."
+                : "Editing is closed for this order."}
+            </div>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="btn-save"
+                disabled={savingId === order.id}
+                onClick={() => updateOrderQuantity(order, quantity)}
+              >
+                {savingId === order.id ? "Saving..." : "Save Changes"}
+              </button>
+
+              <button
+                type="button"
+                className="btn-delete"
+                disabled={cancellingId === order.id}
+                onClick={() => cancelOrder(order)}
+              >
+                {cancellingId === order.id ? "Cancelling..." : "Cancel Order"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (booting) {
     return (
       <main className="orders-page">
-        <h1 className="page-title">MY ORDERS</h1>
-        <p className="no-orders-msg">Loading…</p>
+        <h1 className="page-title">My Orders</h1>
+        <p className="no-orders-msg">Loading your orders…</p>
       </main>
     );
   }
 
-  // --- render ---
-  if (loading) return <p className="text-center mt-8">Loading orders...</p>;
-
   return (
     <main className="orders-page">
-      <h1 className="page-title">MY ORDERS</h1>
-      {!hasOrders && <p className="no-orders-msg">You have no orders yet.</p>}
+      <h1 className="page-title">My Orders</h1>
 
-      {/* Active Orders */}
-      {hasActive && (
+      {activeOrders.length === 0 && pastGrouped.length === 0 ? (
+        <p className="no-orders-msg">You have no orders yet.</p>
+      ) : null}
+
+      {activeOrders.length > 0 ? (
         <section className="orders-group">
-          <header className="orders-group-header">
-            <h2>Active Orders</h2>
-          </header>
-
-          {activeGroups.map(([serveDate, dayOrders]) => (
-            <div key={serveDate} className="orders-list">
-              <h3 className="serve-date-subhead">{formatDate(serveDate)}</h3>
-              {dayOrders.map((order) => {
-                const item = order.menu_items;
-                const editedQty = editing[order.id] ?? order.quantity;
-                const totals = calculateOrderTotals({
-                  quantity: editedQty,
-                  unit_price: order.unit_price,
-                });
-                const deadlinePassed =
-                  item.order_deadline && new Date(item.order_deadline) < new Date();
-
-                return (
-                  <article key={order.id} className="order-card">
-                    <div className="order-img-wrapper">
-                      {item.image_url ? (
-                        <img
-                          src={item.image_url}
-                          alt={item.title}
-                          className="order-img"
-                        />
-                      ) : (
-                        <div className="media-fallback">No image</div>
-                      )}
-                    </div>
-
-                    <div className="order-info">
-                      <div className="order-header">
-                        <h3>{item.title}</h3>
-                        <span className="status-tag confirmed">Confirmed</span>
-                      </div>
-                      <p className="desc">{item.description}</p>
-                      <p className="serve">
-                        <strong>Served:</strong> {formatDate(item.serve_date)}
-                      </p>
-
-                      <div className="price-breakdown">
-                        <div className="line">
-                          <span>Unit Price</span>
-                          <span>${order.unit_price.toFixed(2)}</span>
-                        </div>
-                        <div className="line">
-                          <span>Subtotal</span>
-                          <span>${totals.subtotal}</span>
-                        </div>
-                        <div className="line">
-                          <span>HST (13%)</span>
-                          <span>${totals.tax}</span>
-                        </div>
-                        <div className="line total">
-                          <span>Total</span>
-                          <span>${totals.total}</span>
-                        </div>
-                      </div>
-
-                      {deadlinePassed ? (
-                        <p className="deadline-msg">
-                          ❌ Order deadline passed — changes disabled
-                        </p>
-                      ) : (
-                        <>
-                          <div className="qty-controls">
-                            <button onClick={() => adjustQuantity(order.id, -1)}>
-                              −
-                            </button>
-                            <input
-                              type="number"
-                              min="1"
-                              max="10"
-                              value={editedQty}
-                              onChange={(e) =>
-                                handleQuantityInput(order.id, e.target.value)
-                              }
-                            />
-                            <button onClick={() => adjustQuantity(order.id, 1)}>
-                              +
-                            </button>
-                          </div>
-
-                          <button
-                            onClick={() => handleSave(order)}
-                            disabled={savingId === order.id}
-                            className="btn-save"
-                          >
-                            {savingId === order.id ? "Saving..." : "Save Changes"}
-                          </button>
-
-                          <button
-                            onClick={() => openDeleteSheet(order.id)}
-                            className="btn-delete"
-                          >
-                            Delete Order
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          ))}
+          <div className="orders-group-header">Active Orders</div>
+          <div className="orders-list">
+            {activeOrders.map((order) => renderOrderCard(order, true))}
+          </div>
         </section>
-      )}
+      ) : null}
 
-      {/* Past Orders */}
-      {hasPast && (
+      {pastGrouped.length > 0 ? (
         <section className="orders-group">
-          <header className="orders-group-header">
-            <h2>Past Orders</h2>
-          </header>
+          <div className="orders-group-header">Past Orders</div>
 
           <div className="month-group-list">
-            {sortedMonthKeys.map((key) => {
-              const monthOrders = pastByMonth[key] || [];
-              const summary =
-                monthSummaries[key] || { count: monthOrders.length, range: null };
-              const open = !!expandedMonths[key];
-              const panelId = `month-panel-${key}`;
+            {pastGrouped.map((group) => {
+              const isOpen = !!pastMonthsOpen[group.key];
 
               return (
-                <div key={key} className="month-group">
+                <div key={group.key} className="month-group">
                   <button
+                    type="button"
                     className="month-toggle"
-                    onClick={() => toggleMonth(key)}
-                    aria-expanded={open}
-                    aria-controls={panelId}
+                    onClick={() => toggleMonth(group.key)}
                   >
-                    <span className="month-title">
-                      {monthLabel(key)}{" "}
-                      <span className="month-count">({summary.count} items)</span>
-                    </span>
-                    <span className="month-range">
-                      {summary.range ? summary.range : ""}
-                    </span>
-                    <span className={`chev ${open ? "open" : ""}`} aria-hidden>
-                      ▾
-                    </span>
+                    <span className="month-title">{group.label}</span>
+                    <span className="month-count">{group.items.length} orders</span>
+                    <span className={`chev ${isOpen ? "open" : ""}`}>⌄</span>
                   </button>
 
-                  <div
-                    id={panelId}
-                    className={`month-panel ${open ? "open" : ""}`}
-                    role="region"
-                  >
+                  <div className={`month-panel ${isOpen ? "open" : ""}`}>
                     <div className="orders-list">
-                      {monthOrders.map((order) => {
-                        const item = order.menu_items;
-                        const totals = calculateOrderTotals({
-                          quantity: order.quantity,
-                          unit_price: order.unit_price,
-                        });
-
-                        return (
-                          <article
-                            key={order.id}
-                            className={`order-card ${!item.is_active ? "archived" : ""}`}
-                          >
-                            <div className="order-img-wrapper">
-                              {item.image_url ? (
-                                <img
-                                  src={item.image_url}
-                                  alt={item.title}
-                                  className="order-img"
-                                />
-                              ) : (
-                                <div className="media-fallback">No image</div>
-                              )}
-                            </div>
-
-                            <div className="order-info">
-                              <div className="order-header">
-                                <h3>{item.title}</h3>
-                                {!item.is_active && (
-                                  <span className="archived-badge">Archived</span>
-                                )}
-                              </div>
-
-                              <p className="serve">
-                                <strong>Served:</strong> {formatDate(item.serve_date)}
-                              </p>
-                              <p className="desc">{item.description}</p>
-
-                              <div className="price-breakdown">
-                                <div className="line">
-                                  <span>Unit Price</span>
-                                  <span>${order.unit_price.toFixed(2)}</span>
-                                </div>
-                                <div className="line">
-                                  <span>Subtotal</span>
-                                  <span>${totals.subtotal}</span>
-                                </div>
-                                <div className="line">
-                                  <span>HST (13%)</span>
-                                  <span>${totals.tax}</span>
-                                </div>
-                                <div className="line total">
-                                  <span>Total</span>
-                                  <span>${totals.total}</span>
-                                </div>
-                              </div>
-
-                              <p className="deadline-msg">
-                                {(!item.is_active &&
-                                  "⚠️ Archived — changes disabled.") ||
-                                  "⛔ Read-only"}
-                              </p>
-                            </div>
-                          </article>
-                        );
-                      })}
+                      {group.items.map((order) => renderOrderCard(order, false))}
                     </div>
                   </div>
                 </div>
@@ -520,30 +598,11 @@ export default function OrdersPage() {
             })}
           </div>
         </section>
-      )}
+      ) : null}
 
-      {/* Payment options notice */}
       <div className="payment-options">
-        💳 Payment options include <strong>Cash</strong>, <strong>Debit</strong>, and{" "}
-        <strong>E-Transfer</strong> day of delivery.
+        Payment can be collected at pickup unless your workflow says otherwise.
       </div>
-
-      {/* confirm delete sheet */}
-      {confirmSheet.open && (
-        <div className="sheet-overlay" onClick={closeDeleteSheet}>
-          <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <p className="sheet-title">⚠️ Delete this order?</p>
-            <p className="sheet-text">This action cannot be undone.</p>
-            <div className="sheet-actions">
-              <button onClick={closeDeleteSheet} className="btn-cancel">
-                Cancel
-              </button>
-              <button onClick={confirmDelete} className="btn-confirm">
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}</main>
+    </main>
   );
 }
